@@ -724,7 +724,7 @@ class SQLAssembler:
             if context.schema_linker is None:
                 logger.error("Schema linker is None, cannot generate SQL")
                 return None
-                
+
             table, table_confidence = context.schema_linker.get_best_table_match(
                 original_query, analysis
             )
@@ -1705,7 +1705,11 @@ class SQLAssembler:
                     if self.llm_provider:
                         try:
                             table_name = analysis.main_table
-                            candidate_columns = context.schema_info.get(table_name, []) if context.schema_info else []
+                            candidate_columns = (
+                                context.schema_info.get(table_name, [])
+                                if context.schema_info
+                                else []
+                            )
                             prompt = f"Given the natural language query '{original_query}', choose the correct column for the {{energy_column}} slot in the SQL template for the table '{table_name}' from this list: {candidate_columns}."
 
                             # For now, we'll use a simple approach without async to avoid complexity
