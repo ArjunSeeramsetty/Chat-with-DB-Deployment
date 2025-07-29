@@ -161,7 +161,7 @@ class EnhancedSQLValidator:
             if warnings:
                 try:
                     # Use sqlfluff fix to automatically fix style issues
-                    fix_result = fix.fix_string(sql, dialect="sqlite")
+                    fix_result: List[str] = fix.fix_string(sql, dialect="sqlite")
                     if fix_result and len(fix_result) > 0:
                         fixed_sql = fix_result[0]
                         logger.info("Applied sqlfluff auto-fixes")
@@ -308,7 +308,7 @@ class EnhancedSQLValidator:
                 return False, None
 
             # Use sqlfluff fix for syntax repair
-            fix_result = fix.fix_string(sql, dialect="sqlite")
+            fix_result: List[str] = fix.fix_string(sql, dialect="sqlite")
             if fix_result and len(fix_result) > 0:
                 repaired_sql = fix_result[0]
 

@@ -777,9 +777,12 @@ class SQLAssembler:
 
             # Create separate WHERE clauses for current and previous data
             current_where_clause = where_clause
-            previous_where_clause = where_clause.replace(
-                f"dt.Year = {year}", f"dt.Year = {year - 1}"
-            )
+            if year is not None:
+                previous_where_clause = where_clause.replace(
+                    f"dt.Year = {year}", f"dt.Year = {year - 1}"
+                )
+            else:
+                previous_where_clause = where_clause
 
             # Select appropriate template
             template_key = f"{growth_type}_growth_query"
@@ -834,11 +837,11 @@ class SQLAssembler:
                 return sql
 
         # Look for template based on query type and intent
-        template_key: Optional[str] = None
+        fallback_template_key: Optional[str] = None
         if analysis.query_type.value == "exchange_detail":
-            template_key = "exchange_query"
+            fallback_template_key = "exchange_query"
         elif analysis.query_type.value == "exchange":
-            template_key = "country_daily_exchange_query"
+            fallback_template_key = "country_daily_exchange_query"
         elif analysis.query_type.value == "transmission":
             original_query_lower = original_query.lower() if original_query else ""
             # Check if this is an international transmission query
@@ -854,9 +857,9 @@ class SQLAssembler:
             if any(
                 keyword in original_query_lower for keyword in international_keywords
             ):
-                template_key = "international_transmission_query"
+                fallback_template_key = "international_transmission_query"
             else:
-                template_key = "transmission_query"
+                fallback_template_key = "transmission_query"
         elif analysis.query_type.value == "generation":
             # Check if this is a region-level generation query
             original_query_lower = original_query.lower() if original_query else ""
@@ -864,17 +867,17 @@ class SQLAssembler:
                 word in original_query_lower
                 for word in ["region", "regions", "all regions"]
             ):
-                template_key = "region_generation_query"
+                fallback_template_key = "region_generation_query"
             else:
-                template_key = "generation_query"
+                fallback_template_key = "generation_query"
         elif analysis.query_type.value == "state":
-            template_key = "state_query"
+            fallback_template_key = "state_query"
         elif analysis.query_type.value == "region":
-            template_key = "region_query"
+            fallback_template_key = "region_query"
         elif analysis.query_type.value == "time_block_generation":
-            template_key = "time_block_generation_query"
+            fallback_template_key = "time_block_generation_query"
         elif analysis.query_type.value == "time_block":
-            template_key = "time_block_query"
+            fallback_template_key = "time_block_query"
         elif analysis.intent.value == "trend_analysis":
             # Dynamic trend analysis - determine template based on query content
             original_query_lower = original_query.lower() if original_query else ""
@@ -1784,7 +1787,7 @@ class SQLAssembler:
                 logger.warning(f"No schema linker available, cannot determine column")
                 return None
 
-        logger.warning(f"No template found for key: {template_key}")
+        logger.warning(f"No template found for key: {fallback_template_key}")
         return None
 
     def _generate_with_llm(self, prompt: str) -> Optional[str]:
