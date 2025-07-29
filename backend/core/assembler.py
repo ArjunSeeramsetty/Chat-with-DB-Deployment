@@ -1709,8 +1709,8 @@ class SQLAssembler:
                         try:
                             table_name = analysis.main_table
                             candidate_columns = (
-                                context.schema_info.get(table_name, [])
-                                if context.schema_info
+                                context.schema_info.tables.get(table_name, [])
+                                if context.schema_info and context.schema_info.tables
                                 else []
                             )
                             prompt = f"Given the natural language query '{original_query}', choose the correct column for the {{energy_column}} slot in the SQL template for the table '{table_name}' from this list: {candidate_columns}."
