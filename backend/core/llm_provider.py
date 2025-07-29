@@ -6,7 +6,7 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 logger = logging.getLogger(__name__)
 
@@ -144,10 +144,15 @@ class OpenAIProvider(LLMProvider):
                             role="user", content=msg["content"]
                         )
                     )
+            
+            # Convert to tuple for covariant type safety
+            messages_tuple: Sequence[
+                Union[ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam]
+            ] = tuple(typed_messages)
 
             response = await self.client.chat.completions.create(
                 model=self.model or "gpt-3.5-turbo",
-                messages=typed_messages,
+                messages=messages_tuple,
                 max_tokens=self.max_response_length,
                 temperature=0.1,
             )
