@@ -121,13 +121,16 @@ class OpenAIProvider(LLMProvider):
             messages.append({"role": "user", "content": prompt})
 
             # Convert to proper message types for OpenAI API
+            from typing import List, Union, cast
+
             from openai.types.chat import (
                 ChatCompletionSystemMessageParam,
                 ChatCompletionUserMessageParam,
             )
-            from typing import cast, List, Union
 
-            typed_messages: List[Union[ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam]] = []
+            typed_messages: List[
+                Union[ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam]
+            ] = []
             for msg in messages:
                 if msg["role"] == "system":
                     typed_messages.append(
