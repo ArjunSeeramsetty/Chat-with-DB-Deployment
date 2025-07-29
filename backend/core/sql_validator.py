@@ -7,10 +7,10 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
-from pydantic import Field
 
 import sqlglot
 import sqlparse
+from pydantic import Field
 from sqlglot import exp, parse
 from sqlglot.errors import ParseError
 
