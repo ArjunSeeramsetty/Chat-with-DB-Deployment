@@ -125,8 +125,9 @@ class OpenAIProvider(LLMProvider):
                 ChatCompletionSystemMessageParam,
                 ChatCompletionUserMessageParam,
             )
+            from typing import cast, List, Union
 
-            typed_messages = []
+            typed_messages: List[Union[ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam]] = []
             for msg in messages:
                 if msg["role"] == "system":
                     typed_messages.append(
