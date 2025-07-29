@@ -8,33 +8,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Union
 
-try:
-    from openai.types.chat import (
-        ChatCompletionAssistantMessageParam,
-        ChatCompletionFunctionMessageParam,
-        ChatCompletionSystemMessageParam,
-        ChatCompletionToolMessageParam,
-        ChatCompletionUserMessageParam,
-    )
-except ImportError:
-    # Fallback types for when openai package is not available
-    from typing import NewType
-
-    ChatCompletionSystemMessageParam = NewType(
-        "ChatCompletionSystemMessageParam", Dict[str, str]
-    )
-    ChatCompletionUserMessageParam = NewType(
-        "ChatCompletionUserMessageParam", Dict[str, str]
-    )
-    ChatCompletionAssistantMessageParam = NewType(
-        "ChatCompletionAssistantMessageParam", Dict[str, str]
-    )
-    ChatCompletionToolMessageParam = NewType(
-        "ChatCompletionToolMessageParam", Dict[str, str]
-    )
-    ChatCompletionFunctionMessageParam = NewType(
-        "ChatCompletionFunctionMessageParam", Dict[str, str]
-    )
+# Import OpenAI types
+from openai.types.chat import (
+    ChatCompletionAssistantMessageParam,
+    ChatCompletionFunctionMessageParam,
+    ChatCompletionSystemMessageParam,
+    ChatCompletionToolMessageParam,
+    ChatCompletionUserMessageParam,
+)
 
 logger = logging.getLogger(__name__)
 
