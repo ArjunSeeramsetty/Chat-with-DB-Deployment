@@ -246,7 +246,7 @@ class OllamaProvider(LLMProvider):
             import requests
 
             # Check Ollama GPU info
-            base_url_clean = self.base_url.replace('/v1', '') if self.base_url else ''
+            base_url_clean = self.base_url.replace("/v1", "") if self.base_url else ""
             response = requests.get(f"{base_url_clean}/api/tags")
             if response.status_code == 200:
                 # For now, assume GPU is available if Ollama is running
