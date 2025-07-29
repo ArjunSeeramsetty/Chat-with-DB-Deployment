@@ -121,13 +121,13 @@ class OpenAIProvider(LLMProvider):
             messages.append({"role": "user", "content": prompt})
 
             response = await self.client.chat.completions.create(
-                model=self.model,
+                model=self.model or "gpt-3.5-turbo",
                 messages=messages,
                 max_tokens=self.max_response_length,
                 temperature=0.1,
             )
 
-            content = response.choices[0].message.content
+            content = response.choices[0].message.content or ""
             is_safe = self.validate_response(content)
 
             return LLMResponse(
@@ -177,7 +177,7 @@ class OllamaProvider(LLMProvider):
                 full_prompt = f"{system_prompt}\n\n{prompt}"
 
             # Prepare request parameters for Ollama API
-            request_data = {
+            request_data: Dict[str, Any] = {
                 "model": self.model,
                 "prompt": full_prompt,
                 "stream": False,
@@ -189,8 +189,9 @@ class OllamaProvider(LLMProvider):
                 try:
                     # Check if GPU is available
                     if self._check_gpu_availability():
-                        request_data["options"]["num_gpu"] = 1
-                        request_data["options"]["num_thread"] = 4
+                        if "options" in request_data:
+                            request_data["options"]["num_gpu"] = 1
+                            request_data["options"]["num_thread"] = 4
                         self.gpu_used = True
                         logger.info(f"GPU acceleration enabled for model: {self.model}")
                     else:
@@ -245,7 +246,8 @@ class OllamaProvider(LLMProvider):
             import requests
 
             # Check Ollama GPU info
-            response = requests.get(f"{self.base_url.replace('/v1', '')}/api/tags")
+            base_url_clean = self.base_url.replace('/v1', '') if self.base_url else ''
+            response = requests.get(f"{base_url_clean}/api/tags")
             if response.status_code == 200:
                 # For now, assume GPU is available if Ollama is running
                 # In a real implementation, you might want to check specific GPU info
