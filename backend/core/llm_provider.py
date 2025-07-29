@@ -8,6 +8,22 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Union
 
+try:
+    from openai.types.chat import (
+        ChatCompletionSystemMessageParam,
+        ChatCompletionUserMessageParam,
+        ChatCompletionAssistantMessageParam,
+        ChatCompletionToolMessageParam,
+        ChatCompletionFunctionMessageParam,
+    )
+except ImportError:
+    # Fallback types for when openai package is not available
+    ChatCompletionSystemMessageParam = Dict[str, str]
+    ChatCompletionUserMessageParam = Dict[str, str]
+    ChatCompletionAssistantMessageParam = Dict[str, str]
+    ChatCompletionToolMessageParam = Dict[str, str]
+    ChatCompletionFunctionMessageParam = Dict[str, str]
+
 logger = logging.getLogger(__name__)
 
 
@@ -129,7 +145,13 @@ class OpenAIProvider(LLMProvider):
             )
 
             typed_messages: List[
-                Union[ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam]
+                Union[
+                    ChatCompletionSystemMessageParam,
+                    ChatCompletionUserMessageParam,
+                    ChatCompletionAssistantMessageParam,
+                    ChatCompletionToolMessageParam,
+                    ChatCompletionFunctionMessageParam,
+                ]
             ] = []
             for msg in messages:
                 if msg["role"] == "system":
