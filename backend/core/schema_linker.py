@@ -777,7 +777,7 @@ class SchemaLinker:
         query_lower = user_query.lower()
 
         # Define table patterns and their keywords
-        table_patterns = {
+        table_patterns: Dict[str, Dict[str, Any]] = {
             "FactAllIndiaDailySummary": {
                 "keywords": [
                     "region",
@@ -847,19 +847,19 @@ class SchemaLinker:
             score = 0.0
 
             # Check keyword matches
-            keywords: List[str] = pattern["keywords"]
+            keywords: List[str] = pattern.get("keywords", [])
             keyword_matches = sum(1 for keyword in keywords if keyword in query_lower)
             if keyword_matches > 0:
                 score += keyword_matches * 0.3
 
             # Check metric matches
-            metrics: List[str] = pattern["metrics"]
+            metrics: List[str] = pattern.get("metrics", [])
             metric_matches = sum(1 for metric in metrics if metric in query_lower)
             if metric_matches > 0:
                 score += metric_matches * 0.4
 
             # Apply priority multiplier
-            priority: float = float(pattern["priority"])
+            priority: float = float(pattern.get("priority", 1.0))
             score *= priority
 
             # Special handling for generation queries

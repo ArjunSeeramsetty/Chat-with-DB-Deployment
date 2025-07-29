@@ -721,6 +721,10 @@ class SQLAssembler:
                 year = datetime.now().year
 
             # Auto-determine table and configuration
+            if context.schema_linker is None:
+                logger.error("Schema linker is None, cannot generate SQL")
+                return None
+                
             table, table_confidence = context.schema_linker.get_best_table_match(
                 original_query, analysis
             )
@@ -746,7 +750,7 @@ class SQLAssembler:
             # Build where clause
             year = (
                 analysis.time_period.get("year")
-                if analysis.time_period
+                if analysis.time_period and analysis.time_period.get("year") is not None
                 else datetime.now().year
             )
             where_clause = f"dt.Year = {year}"
@@ -830,7 +834,7 @@ class SQLAssembler:
                 return sql
 
         # Look for template based on query type and intent
-        template_key = None
+        template_key: Optional[str] = None
         if analysis.query_type.value == "exchange_detail":
             template_key = "exchange_query"
         elif analysis.query_type.value == "exchange":
@@ -1701,7 +1705,7 @@ class SQLAssembler:
                     if self.llm_provider:
                         try:
                             table_name = analysis.main_table
-                            candidate_columns = context.schema_info.get(table_name, [])
+                            candidate_columns = context.schema_info.get(table_name, []) if context.schema_info else []
                             prompt = f"Given the natural language query '{original_query}', choose the correct column for the {{energy_column}} slot in the SQL template for the table '{table_name}' from this list: {candidate_columns}."
 
                             # For now, we'll use a simple approach without async to avoid complexity
