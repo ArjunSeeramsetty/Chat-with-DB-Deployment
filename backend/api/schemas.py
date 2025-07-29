@@ -60,7 +60,7 @@ class HealthResponse(BaseModel):
 class SchemaResponse(BaseModel):
     """Schema information response"""
 
-    schema: Dict[str, List[str]]
+    schema_data: Dict[str, List[str]] = Field(alias="schema")
 
 
 class ChartRequest(BaseModel):

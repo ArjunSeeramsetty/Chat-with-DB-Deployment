@@ -21,7 +21,7 @@ class EntityLoader:
 
     def __init__(self, config_path: str = "config/business_rules.yaml"):
         self.config_path = Path(config_path)
-        self._entities = None
+        self._entities: Dict[str, Any] = {}
         self._load_entities()
 
     def _load_entities(self) -> None:
