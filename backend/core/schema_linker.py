@@ -64,8 +64,8 @@ class SchemaLinker:
         self.business_rules = self._load_business_rules()
 
         # Build schema embeddings
-        self.schema_elements = []
-        self.element_types = []
+        self.schema_elements: List[str] = []
+        self.element_types: List[str] = []
         self.schema_vectors = None
         self._build_schema_embeddings()
 

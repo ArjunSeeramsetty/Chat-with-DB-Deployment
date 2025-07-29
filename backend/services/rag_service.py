@@ -79,10 +79,12 @@ class EnhancedRAGService:
         self.sql_validator = LegacySQLValidator(
             self.schema_info
         )  # Legacy validator for backward compatibility
+        # Ensure schema_info is properly typed
+        schema_info_dict: Dict[str, List[str]] = self.schema_info or {}
         self.schema_linker = SchemaLinker(
-            self.schema_info, db_path, llm_provider=self.llm_provider
+            schema_info_dict, db_path, llm_provider=self.llm_provider
         )
-        self.candidate_ranker = CandidateRanker(self.schema_info)
+        self.candidate_ranker = CandidateRanker(schema_info_dict)
 
     async def process_query(self, request: QueryRequest) -> QueryResponse:
         """
@@ -114,8 +116,8 @@ class EnhancedRAGService:
                     sql_query="",
                     correlation_id=correlation_id or str(uuid.uuid4()),
                     processing_time=time.time() - start_time,
-                    processing_mode=request.processing_mode.value,
-                    query_type="unknown",
+                    processing_mode=request.processing_mode,
+                    query_type=QueryType.UNKNOWN,
                     api_calls=0,
                     clarification_attempt_count=request.clarification_attempt_count,
                 )
@@ -203,8 +205,8 @@ class EnhancedRAGService:
                     sql_query="",
                     correlation_id=correlation_id or str(uuid.uuid4()),
                     processing_time=time.time() - start_time,
-                    processing_mode=request.processing_mode.value,
-                    query_type=query_analysis.query_type.value,
+                    processing_mode=request.processing_mode,
+                    query_type=query_analysis.query_type,
                     api_calls=self._count_api_calls(request.processing_mode, None),
                     clarification_attempt_count=attempt_count,
                 )
@@ -293,8 +295,8 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                                 sql_query="",
                                 correlation_id=correlation_id or str(uuid.uuid4()),
                                 processing_time=time.time() - start_time,
-                                processing_mode=request.processing_mode.value,
-                                query_type=query_analysis.query_type.value,
+                                processing_mode=request.processing_mode,
+                                query_type=query_analysis.query_type,
                                 api_calls=self._count_api_calls(
                                     request.processing_mode, None
                                 ),
@@ -317,8 +319,8 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     sql_query="",
                     correlation_id=correlation_id or str(uuid.uuid4()),
                     processing_time=time.time() - start_time,
-                    processing_mode=request.processing_mode.value,
-                    query_type=query_analysis.query_type.value,
+                    processing_mode=request.processing_mode,
+                    query_type=query_analysis.query_type,
                     api_calls=self._count_api_calls(request.processing_mode, None),
                     clarification_attempt_count=request.clarification_attempt_count + 1,
                 )
@@ -403,8 +405,8 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     sql_query="",
                     correlation_id=correlation_id or str(uuid.uuid4()),
                     processing_time=time.time() - start_time,
-                    processing_mode=request.processing_mode.value,
-                    query_type=query_analysis.query_type.value,
+                    processing_mode=request.processing_mode,
+                    query_type=query_analysis.query_type,
                     api_calls=self._count_api_calls(request.processing_mode, None),
                     clarification_attempt_count=request.clarification_attempt_count + 1,
                 )
@@ -444,8 +446,8 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     correlation_id=correlation_id
                     or str(uuid.uuid4()),  # Provide default if None
                     processing_time=time.time() - start_time,
-                    processing_mode=request.processing_mode.value,
-                    query_type=query_analysis.query_type.value,
+                    processing_mode=request.processing_mode,
+                    query_type=query_analysis.query_type,
                     api_calls=self._count_api_calls(request.processing_mode, None),
                 )
                 return response
@@ -487,8 +489,8 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 correlation_id=correlation_id
                 or str(uuid.uuid4()),  # Provide default if None
                 processing_time=time.time() - start_time,
-                processing_mode=request.processing_mode.value,
-                query_type=query_analysis.query_type.value,
+                processing_mode=request.processing_mode,
+                query_type=query_analysis.query_type,
                 intent_analysis=query_analysis.dict(),
                 follow_up_suggestions=suggestions,
                 visualization=visualization.dict() if visualization else None,
@@ -527,7 +529,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 correlation_id=correlation_id
                 or str(uuid.uuid4()),  # Provide default if None
                 processing_time=time.time() - start_time,
-                processing_mode=request.processing_mode.value,
+                processing_mode=request.processing_mode,
                 api_calls=0,
             )
             return response
