@@ -16,7 +16,7 @@ from backend.api.deps import get_rag_service as get_rag_service_dep
 from backend.api.deps import get_settings_dep
 from backend.config import get_settings
 from backend.core.sql_validator import SQLValidator
-from backend.core.types import ProcessingMode, QueryRequest, QueryResponse
+from backend.core.types import ProcessingMode, QueryRequest, QueryResponse, SchemaInfo
 from backend.services.rag_service import EnhancedRAGService, get_rag_service
 
 logger = logging.getLogger(__name__)
