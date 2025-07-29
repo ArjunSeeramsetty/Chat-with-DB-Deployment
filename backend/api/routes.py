@@ -261,7 +261,7 @@ async def validate_sql(
     try:
         # Use enhanced validator
         validator = rag_service.enhanced_validator
-        result = validator.validate_sql(sql)
+        result = validator.validate_sql(str(sql))
 
         return {
             "success": result.is_valid,

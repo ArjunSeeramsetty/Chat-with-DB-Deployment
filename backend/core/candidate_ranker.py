@@ -161,7 +161,9 @@ class CandidateRanker:
                 return 0.0
 
             # Use first statement from parse tree
-            statement = parse_tree[0]
+            statement = parse_tree[0] if parse_tree else None
+            if not statement:
+                return 0.0
 
             # Extract table and column references
             tables = set()
@@ -209,14 +211,16 @@ class CandidateRanker:
                 return 0.0
 
             # Use first statement from parse tree
-            statement = parse_tree[0]
+            statement = parse_tree[0] if parse_tree else None
+            if not statement:
+                return 0.0
 
             # Count complexity factors
-            complexity_factors = 0
+            complexity_factors: float = 0.0
 
             # Subqueries
             subqueries = list(statement.find_all(exp.Subquery))
-            complexity_factors += len(subqueries) * 2
+            complexity_factors += len(subqueries) * 2.0
 
             # CTEs
             ctes = list(statement.find_all(exp.CTE))

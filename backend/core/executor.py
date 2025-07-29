@@ -68,7 +68,7 @@ class SQLExecutor:
 
     def _execute_sync(
         self, sql: str
-    ) -> Tuple[bool, Optional[List[Dict]], Optional[str]]:
+    ) -> Tuple[bool, Optional[List[Dict[str, Any]]], Optional[str]]:
         """
         Synchronous SQL execution.
         """
