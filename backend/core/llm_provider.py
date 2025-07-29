@@ -145,14 +145,12 @@ class OpenAIProvider(LLMProvider):
                         )
                     )
 
-            # Convert to tuple for covariant type safety
-            messages_tuple: Sequence[
-                Union[ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam]
-            ] = tuple(typed_messages)
+            # Convert back to list for API compatibility
+            messages_list = list(typed_messages)
 
             response = await self.client.chat.completions.create(
+                messages=messages_list,
                 model=self.model or "gpt-3.5-turbo",
-                messages=messages_tuple,
                 max_tokens=self.max_response_length,
                 temperature=0.1,
             )
