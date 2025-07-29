@@ -292,7 +292,7 @@ class IntentAnalyzer:
 
             # If we found date expressions, try to parse them
             if date_expressions:
-                parsed_dates = []
+                parsed_dates: List[date] = []
 
                 for expr in date_expressions:
                     try:
