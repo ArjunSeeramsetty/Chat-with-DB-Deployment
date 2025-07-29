@@ -121,14 +121,25 @@ class OpenAIProvider(LLMProvider):
             messages.append({"role": "user", "content": prompt})
 
             # Convert to proper message types for OpenAI API
-            from openai.types.chat import ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam
-            
+            from openai.types.chat import (
+                ChatCompletionSystemMessageParam,
+                ChatCompletionUserMessageParam,
+            )
+
             typed_messages = []
             for msg in messages:
                 if msg["role"] == "system":
-                    typed_messages.append(ChatCompletionSystemMessageParam(role="system", content=msg["content"]))
+                    typed_messages.append(
+                        ChatCompletionSystemMessageParam(
+                            role="system", content=msg["content"]
+                        )
+                    )
                 elif msg["role"] == "user":
-                    typed_messages.append(ChatCompletionUserMessageParam(role="user", content=msg["content"]))
+                    typed_messages.append(
+                        ChatCompletionUserMessageParam(
+                            role="user", content=msg["content"]
+                        )
+                    )
 
             response = await self.client.chat.completions.create(
                 model=self.model or "gpt-3.5-turbo",
