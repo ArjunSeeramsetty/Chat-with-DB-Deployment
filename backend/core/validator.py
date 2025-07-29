@@ -165,9 +165,7 @@ class EnhancedSQLValidator:
                     fixed_sql = self._manual_style_fix(sql, warnings)
                     logger.info("Applied manual style fixes")
                 except Exception as e:
-                    logger.warning(
-                        f"Style fix failed: {e}, using original SQL"
-                    )
+                    logger.warning(f"Style fix failed: {e}, using original SQL")
                     fixed_sql = sql
 
             return True, fixed_sql, warnings
