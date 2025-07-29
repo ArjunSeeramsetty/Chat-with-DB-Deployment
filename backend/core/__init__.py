@@ -1,1 +1,1 @@
-# Core components for Text-to-SQL system 
+# Core components for Text-to-SQL system

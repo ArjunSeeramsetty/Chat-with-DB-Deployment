@@ -160,11 +160,16 @@ class TestComponentIntegration:
         assembler = SQLAssembler()
         
         # Test SQL generation
-        from backend.core.types import QueryAnalysis, QueryType
+        from backend.core.types import QueryAnalysis, QueryType, IntentType
         analysis = QueryAnalysis(
             query_type=QueryType.STATE,
+            intent=IntentType.DATA_RETRIEVAL,
             entities=['maharashtra'],
-            confidence=0.9
+            confidence=0.9,
+            main_table="FactStateDailyEnergy",
+            dimension_table="DimStates",
+            join_key="StateID",
+            name_column="StateName"
         )
         
         sql_result = assembler.generate_sql("What is the energy consumption?", analysis)

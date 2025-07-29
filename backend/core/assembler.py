@@ -3,31 +3,38 @@ SQL Assembler Module
 Provides intelligent SQL generation from natural language queries
 """
 
-import re
 import logging
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime
+import re
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-from ..core.types import QueryAnalysis, ContextInfo, SQLGenerationResult
-from ..core.schema_linker import SchemaLinker
 from ..core.entity_loader import get_entity_loader
-import logging
-import re
-from typing import List, Dict, Any, Optional
+from ..core.schema_linker import SchemaLinker
+from ..core.types import ContextInfo, QueryAnalysis, SQLGenerationResult
 
 logger = logging.getLogger(__name__)
 
+
 class SQLAssembler:
     """Enhanced SQL assembler with improved template handling and dynamic table/column selection"""
-    
+
     def __init__(self, llm_provider=None):
         self.llm_provider = llm_provider
-        print("🔧 SQLAssembler initialized with updated code - Monthly detection enabled!")
-        self.general_geographic_keywords = ['all states', 'all regions', 'states', 'regions', 'country', 'india']
+        print(
+            "🔧 SQLAssembler initialized with updated code - Monthly detection enabled!"
+        )
+        self.general_geographic_keywords = [
+            "all states",
+            "all regions",
+            "states",
+            "regions",
+            "country",
+            "india",
+        ]
         self.entity_loader = get_entity_loader()
         self.sql_templates = {
-            'region_query': """
+            "region_query": """
                 SELECT d.RegionName, ROUND({aggregation_function}(f.{energy_column}), 2) as {column_alias}
                 FROM FactAllIndiaDailySummary f
                 JOIN DimRegions d ON f.RegionID = d.RegionID
@@ -36,7 +43,7 @@ class SQLAssembler:
                 GROUP BY d.RegionName
                 ORDER BY {column_alias} DESC
             """,
-            'state_query': """
+            "state_query": """
                 SELECT ds.StateName, ROUND({aggregation_function}(fs.{energy_column}), 2) as {column_alias}
                 FROM FactStateDailyEnergy fs
                 JOIN DimStates ds ON fs.StateID = ds.StateID
@@ -45,7 +52,7 @@ class SQLAssembler:
                 GROUP BY ds.StateName
                 ORDER BY {column_alias} DESC
             """,
-            'generation_query': """
+            "generation_query": """
                 SELECT dgs.SourceName, ROUND(SUM(fdgb.GenerationAmount), 2) as TotalGeneration
                 FROM FactDailyGenerationBreakdown fdgb
                 JOIN DimGenerationSources dgs ON fdgb.GenerationSourceID = dgs.GenerationSourceID
@@ -54,7 +61,7 @@ class SQLAssembler:
                 GROUP BY dgs.SourceName
                 ORDER BY TotalGeneration DESC
             """,
-            'region_generation_query': """
+            "region_generation_query": """
                 SELECT d.RegionName, ROUND(SUM(fdgb.GenerationAmount), 2) as TotalGeneration
                 FROM FactDailyGenerationBreakdown fdgb
                 JOIN DimRegions d ON fdgb.RegionID = d.RegionID
@@ -64,7 +71,7 @@ class SQLAssembler:
                 GROUP BY d.RegionName
                 ORDER BY TotalGeneration DESC
             """,
-            'transmission_query': """
+            "transmission_query": """
                 SELECT dtl.LineIdentifier, ROUND({aggregation_function}(ftl.{energy_column}), 2) as {column_alias}
                 FROM FactTransmissionLinkFlow ftl
                 JOIN DimTransmissionLinks dtl ON ftl.LineID = dtl.LineID
@@ -73,7 +80,7 @@ class SQLAssembler:
                 GROUP BY dtl.LineIdentifier
                 ORDER BY {column_alias} DESC
             """,
-            'international_transmission_query': """
+            "international_transmission_query": """
                 SELECT dtl.LineIdentifier, ROUND({aggregation_function}(fitl.{energy_column}), 2) as {column_alias}
                 FROM FactInternationalTransmissionLinkFlow fitl
                 JOIN DimTransmissionLines dtl ON fitl.LineID = dtl.LineID
@@ -82,7 +89,7 @@ class SQLAssembler:
                 GROUP BY dtl.LineIdentifier
                 ORDER BY {column_alias} DESC
             """,
-            'exchange_query': """
+            "exchange_query": """
                 SELECT 
                     dc.CountryName,
                     dem.MechanismName,
@@ -98,7 +105,7 @@ class SQLAssembler:
                 {where_clause}
                 ORDER BY fted.ExchangeValue DESC
             """,
-            'country_daily_exchange_query': """
+            "country_daily_exchange_query": """
                 SELECT 
                     dc.CountryName,
                     ROUND({aggregation_function}(fce.{energy_column}), 2) as {column_alias},
@@ -112,7 +119,7 @@ class SQLAssembler:
                 GROUP BY dc.CountryName, dt.Year, dt.Month, dt.DayOfMonth
                 ORDER BY {column_alias} DESC
             """,
-            'monthly_growth_query': """
+            "monthly_growth_query": """
                 SELECT 
                     current.{region_column},
                     current.Month,
@@ -161,7 +168,7 @@ class SQLAssembler:
                     (current.Month = previous.Month + 1 OR (current.Month = 1 AND previous.Month = 12))
                 ORDER BY current.{region_column}, current.SourceName, current.Month
             """,
-            'weekly_growth_query': """
+            "weekly_growth_query": """
                 SELECT 
                     current.{region_column},
                     current.Week,
@@ -210,7 +217,7 @@ class SQLAssembler:
                     current.Week = previous.Week + 1
                 ORDER BY current.{region_column}, current.SourceName, current.Week
             """,
-            'daily_growth_query': """
+            "daily_growth_query": """
                 SELECT 
                     current.{region_column},
                     current.DayOfMonth,
@@ -259,7 +266,7 @@ class SQLAssembler:
                     current.DayOfMonth = previous.DayOfMonth + 1
                 ORDER BY current.{region_column}, current.SourceName, current.DayOfMonth
             """,
-            'yearly_growth_query': """
+            "yearly_growth_query": """
                 SELECT 
                     current.{region_column},
                     current.Year,
@@ -308,7 +315,7 @@ class SQLAssembler:
                     current.Year = previous.Year + 1
                 ORDER BY current.{region_column}, current.SourceName, current.Year
             """,
-            'quarterly_growth_query': """
+            "quarterly_growth_query": """
                 WITH QuarterlyData AS (
                     SELECT 
                         dt.Year,
@@ -370,14 +377,14 @@ class SQLAssembler:
                 FROM GrowthData
                 ORDER BY {region_column}, Year, Quarter
             """,
-            'time_block_query': """
+            "time_block_query": """
                 SELECT ROUND({aggregation_function}(ftb.{energy_column}), 2) as {column_alias}
                 FROM FactTimeBlockPowerData ftb
                 JOIN DimDates dt ON ftb.DateID = dt.DateID
                 {where_clause}
                 ORDER BY {column_alias} DESC
             """,
-            'time_block_generation_query': """
+            "time_block_generation_query": """
                 SELECT dgs.SourceName, ftbg.BlockNumber, ROUND(SUM(ftbg.GenerationOutput), 2) as TotalGeneration
                 FROM FactTimeBlockGeneration ftbg
                 JOIN DimGenerationSources dgs ON ftbg.GenerationSourceID = dgs.GenerationSourceID
@@ -385,64 +392,72 @@ class SQLAssembler:
                 {where_clause}
                 GROUP BY dgs.SourceName, ftbg.BlockNumber
                 ORDER BY TotalGeneration DESC
-            """
+            """,
         }
-    
-    def generate_sql(self, query: str, analysis: QueryAnalysis, context: ContextInfo) -> SQLGenerationResult:
+
+    def generate_sql(
+        self, query: str, analysis: QueryAnalysis, context: ContextInfo
+    ) -> SQLGenerationResult:
         """
         Generate SQL based on query analysis and context.
         """
-        print(f"🔍 GENERATE_SQL CALLED - Query: '{query}', Query Type: {analysis.query_type.value}")
+        print(
+            f"🔍 GENERATE_SQL CALLED - Query: '{query}', Query Type: {analysis.query_type.value}"
+        )
         try:
             # Build generation prompt
             prompt = self._build_generation_prompt(query, analysis, context)
-            
+
             # Generate SQL using LLM or templates
             print(f"🔍 CALLING _generate_with_templates")
             sql = self._generate_with_templates(analysis, context, query)
-            
+
             if not sql:
                 print(f"🔍 TEMPLATE GENERATION FAILED, falling back to LLM")
-                logger.warning(f"Template generation failed for query: {query}, falling back to LLM")
-                logger.warning(f"Context has schema_linker: {hasattr(context, 'schema_linker')}")
-                if hasattr(context, 'schema_linker'):
-                    logger.warning(f"Schema linker is None: {context.schema_linker is None}")
+                logger.warning(
+                    f"Template generation failed for query: {query}, falling back to LLM"
+                )
+                logger.warning(
+                    f"Context has schema_linker: {hasattr(context, 'schema_linker')}"
+                )
+                if hasattr(context, "schema_linker"):
+                    logger.warning(
+                        f"Schema linker is None: {context.schema_linker is None}"
+                    )
                 # Fallback to LLM if available
                 sql = self._generate_with_llm(prompt)
             else:
                 print(f"🔍 TEMPLATE GENERATION SUCCEEDED")
                 logger.info(f"Template generation succeeded for query: {query}")
-            
+
             if not sql:
                 return SQLGenerationResult(
                     success=False,
                     sql="",  # Provide required field
                     error="Failed to generate SQL",
-                    confidence=0.0
+                    confidence=0.0,
                 )
-            
+
             # Post-process SQL
             processed_sql = self._post_process_sql(sql)
-            
+
             # Calculate confidence based on query clarity and completeness
             confidence = self._calculate_query_confidence(query, analysis)
             logger.info(f"Final confidence score for query '{query}': {confidence}")
-            
+
             return SQLGenerationResult(
-                success=True,
-                sql=processed_sql,
-                confidence=confidence
+                success=True, sql=processed_sql, confidence=confidence
             )
-            
+
         except Exception as e:
             logger.error(f"Error generating SQL: {e}")
             return SQLGenerationResult(
                 success=False,
                 sql="",  # Provide required field
                 error=f"SQL generation error: {str(e)}",
-                confidence=0.0
+                confidence=0.0,
             )
-    
+
     def _calculate_query_confidence(self, query: str, analysis: QueryAnalysis) -> float:
         """
         Calculate confidence score for the query based on various factors.
@@ -450,73 +465,120 @@ class SQLAssembler:
         """
         query_lower = query.lower()
         confidence = 0.0
-        
+
         # Base confidence from having a query type
         if analysis.query_type:
             confidence += 0.3
-        
+
         # Geographic information
         has_geographic_info = (
-            any('state' in entity.lower() for entity in analysis.entities) or
-            any('region' in entity.lower() for entity in analysis.entities) or
-            any(keyword in query_lower for keyword in self.general_geographic_keywords)
+            any("state" in entity.lower() for entity in analysis.entities)
+            or any("region" in entity.lower() for entity in analysis.entities)
+            or any(
+                keyword in query_lower for keyword in self.general_geographic_keywords
+            )
         )
         if has_geographic_info:
             confidence += 0.2
-        
+
         # Time information
         has_time_info = (
-            analysis.time_period or 
-            (analysis.time_period and analysis.time_period.get('start_year')) or
-            (analysis.time_period and analysis.time_period.get('end_year')) or
-            any(keyword in query_lower for keyword in ['2024', '2025', '2023', 'this year', 'last year'])
+            analysis.time_period
+            or (analysis.time_period and analysis.time_period.get("start_year"))
+            or (analysis.time_period and analysis.time_period.get("end_year"))
+            or any(
+                keyword in query_lower
+                for keyword in ["2024", "2025", "2023", "this year", "last year"]
+            )
         )
         if has_time_info:
             confidence += 0.2
-        
+
         # Metric information - check for specific metrics mentioned
         metric_keywords = [
-            'energymet', 'energy met', 'energy supplied', 'energy consumed', 'energy consumption',
-            'energyshortage', 'energy shortage', 'energy not supplied',
-            'demandmet', 'demand met', 'maximum demand', 'peak demand',
-            'outage', 'central sector outage', 'state sector outage', 'private sector outage',
-            'generation', 'thermal generation', 'total generation',
-            'shortage', 'power shortage'
+            "energymet",
+            "energy met",
+            "energy supplied",
+            "energy consumed",
+            "energy consumption",
+            "energyshortage",
+            "energy shortage",
+            "energy not supplied",
+            "demandmet",
+            "demand met",
+            "maximum demand",
+            "peak demand",
+            "outage",
+            "central sector outage",
+            "state sector outage",
+            "private sector outage",
+            "generation",
+            "thermal generation",
+            "total generation",
+            "shortage",
+            "power shortage",
         ]
-        
+
         has_metric_info = any(keyword in query_lower for keyword in metric_keywords)
         if has_metric_info:
             confidence += 0.4  # Higher confidence when specific metrics are mentioned
-        
+
         # Aggregation information
         aggregation_keywords = [
-            'maximum', 'max', 'highest', 'top', 'most',
-            'minimum', 'min', 'lowest', 'least',
-            'average', 'avg', 'mean',
-            'total', 'sum', 'sum of',
-            'count', 'number of'
+            "maximum",
+            "max",
+            "highest",
+            "top",
+            "most",
+            "minimum",
+            "min",
+            "lowest",
+            "least",
+            "average",
+            "avg",
+            "mean",
+            "total",
+            "sum",
+            "sum of",
+            "count",
+            "number of",
         ]
-        
-        has_aggregation_info = any(keyword in query_lower for keyword in aggregation_keywords)
+
+        has_aggregation_info = any(
+            keyword in query_lower for keyword in aggregation_keywords
+        )
         if has_aggregation_info:
             confidence += 0.3  # Higher confidence for aggregation queries
-        
+
         # Bonus for very specific queries with clear intent
-        if has_metric_info and has_aggregation_info and has_geographic_info and has_time_info:
+        if (
+            has_metric_info
+            and has_aggregation_info
+            and has_geographic_info
+            and has_time_info
+        ):
             confidence += 0.2  # Extra bonus for complete queries
-        
+
         # Penalize very vague queries
         vague_indicators = [
-            'what is', 'show me', 'give me', 'tell me about',
-            'data', 'information', 'details'
+            "what is",
+            "show me",
+            "give me",
+            "tell me about",
+            "data",
+            "information",
+            "details",
         ]
-        
-        if any(indicator in query_lower for indicator in vague_indicators) and not has_metric_info:
+
+        if (
+            any(indicator in query_lower for indicator in vague_indicators)
+            and not has_metric_info
+        ):
             confidence -= 0.3  # Stronger penalty for vague queries
-        
+
         # Ensure confidence is between 0 and 1
         confidence = max(0.0, min(1.0, confidence))
-        
+
         # Log detailed confidence breakdown
         logger.info(f"Confidence calculation for '{query}':")
         logger.info(f"  - Query type: {analysis.query_type} (+0.3)")
@@ -524,12 +586,16 @@ class SQLAssembler:
         logger.info(f"  - Time info: {has_time_info} (+0.2)")
         logger.info(f"  - Metric info: {has_metric_info} (+0.4)")
         logger.info(f"  - Aggregation info: {has_aggregation_info} (+0.3)")
-        logger.info(f"  - Complete query bonus: {has_metric_info and has_aggregation_info and has_geographic_info and has_time_info} (+0.2)")
+        logger.info(
+            f"  - Complete query bonus: {has_metric_info and has_aggregation_info and has_geographic_info and has_time_info} (+0.2)"
+        )
         logger.info(f"  - Final confidence: {confidence:.3f}")
-        
+
         return confidence
-    
-    def _build_generation_prompt(self, query: str, analysis: QueryAnalysis, context: ContextInfo) -> str:
+
+    def _build_generation_prompt(
+        self, query: str, analysis: QueryAnalysis, context: ContextInfo
+    ) -> str:
         """
         Build a prompt for SQL generation.
         """
@@ -558,10 +624,12 @@ class SQLAssembler:
         4. Groups and orders results appropriately
         5. Returns only the SQL query, no explanations
         """
-        
+
         return prompt
-    
-    def _generate_with_templates(self, analysis: QueryAnalysis, context: ContextInfo, original_query: str = "") -> Optional[str]:
+
+    def _generate_with_templates(
+        self, analysis: QueryAnalysis, context: ContextInfo, original_query: str = ""
+    ) -> Optional[str]:
         """
         Generate SQL using predefined templates.
         """
@@ -571,400 +639,627 @@ class SQLAssembler:
         logger.info(f"Detected keywords: {analysis.detected_keywords}")
         logger.info(f"Query type: {analysis.query_type.value}")
         logger.info(f"Intent: {analysis.intent.value}")
-        
+
         # Check for growth queries first
-        if analysis.intent.value == 'trend_analysis' and 'growth' in analysis.detected_keywords:
-            logger.info(f"Growth query detected - Intent: {analysis.intent.value}, Keywords: {analysis.detected_keywords}")
-            
+        if (
+            analysis.intent.value == "trend_analysis"
+            and "growth" in analysis.detected_keywords
+        ):
+            logger.info(
+                f"Growth query detected - Intent: {analysis.intent.value}, Keywords: {analysis.detected_keywords}"
+            )
+
             # Determine growth type (monthly, quarterly, yearly)
             original_query_lower = original_query.lower() if original_query else ""
             growth_type = "monthly"  # Default
-            
-            if any(word in original_query_lower for word in ['quarterly', 'quarter', 'q1', 'q2', 'q3', 'q4']):
+
+            if any(
+                word in original_query_lower
+                for word in ["quarterly", "quarter", "q1", "q2", "q3", "q4"]
+            ):
                 growth_type = "quarterly"
-            elif any(word in original_query_lower for word in ['yearly', 'annual', 'year over year']):
+            elif any(
+                word in original_query_lower
+                for word in ["yearly", "annual", "year over year"]
+            ):
                 growth_type = "yearly"
-            elif any(word in original_query_lower for word in ['monthly', 'month over month']):
+            elif any(
+                word in original_query_lower for word in ["monthly", "month over month"]
+            ):
                 growth_type = "monthly"
-            
+
             logger.info(f"Detected growth type: {growth_type}")
-            
+
             # Extract entities dynamically
             region_name = None
             state_name = None
             year = None
-            
+
             # Extract region/state from entities (currently returns list of strings)
             if analysis.entities:
                 # Get entity lists for comparison
                 try:
                     from backend.core.entity_loader import get_entity_loader
+
                     entity_loader = get_entity_loader()
                     indian_regions = entity_loader.get_indian_regions()
                     indian_states = entity_loader.get_indian_states()
-                    
+
                     for entity in analysis.entities:
                         # Check if it's a region
-                        if entity.lower() in [region.lower() for region in indian_regions]:
+                        if entity.lower() in [
+                            region.lower() for region in indian_regions
+                        ]:
                             region_name = entity
                         # Check if it's a state
-                        elif entity.lower() in [state.lower() for state in indian_states]:
+                        elif entity.lower() in [
+                            state.lower() for state in indian_states
+                        ]:
                             state_name = entity
                 except ImportError:
                     # Fallback if entity loader is not available
                     logger.warning("Entity loader not available, using default values")
                     region_name = None
                     state_name = None
-            
+
             # Extract year from time_period
             if analysis.time_period:
                 # Check for different possible keys in time_period
-                if analysis.time_period.get('year'):
-                    year = analysis.time_period.get('year')
-                elif analysis.time_period.get('start_year'):
-                    year = analysis.time_period.get('start_year')
+                if analysis.time_period.get("year"):
+                    year = analysis.time_period.get("year")
+                elif analysis.time_period.get("start_year"):
+                    year = analysis.time_period.get("start_year")
                 else:
                     # Default to current year if not specified
                     from datetime import datetime
+
                     year = datetime.now().year
             else:
                 # Default to current year if not specified
                 from datetime import datetime
+
                 year = datetime.now().year
-            
+
             # Auto-determine table and configuration
-            table, table_confidence = context.schema_linker.get_best_table_match(original_query, analysis)
+            table, table_confidence = context.schema_linker.get_best_table_match(
+                original_query, analysis
+            )
             table_config = context.schema_linker.get_table_config(table, original_query)
-            
+
             # Get energy column from schema linker
-            energy_column = context.schema_linker.get_best_column_match(
-                user_query=original_query,
-                table_name=table,
-                query_type="energy"
-            ) or "EnergyMet"
-            
+            energy_column = (
+                context.schema_linker.get_best_column_match(
+                    user_query=original_query, table_name=table, query_type="energy"
+                )
+                or "EnergyMet"
+            )
+
             # Determine aggregation function
             aggregation_function = "SUM"  # Default
-            if original_query and 'average' in original_query.lower():
+            if original_query and "average" in original_query.lower():
                 aggregation_function = "AVG"
-            elif original_query and 'maximum' in original_query.lower():
+            elif original_query and "maximum" in original_query.lower():
                 aggregation_function = "MAX"
-            elif original_query and 'minimum' in original_query.lower():
+            elif original_query and "minimum" in original_query.lower():
                 aggregation_function = "MIN"
-            
+
             # Build where clause
-            year = analysis.time_period.get('year') if analysis.time_period else datetime.now().year
+            year = (
+                analysis.time_period.get("year")
+                if analysis.time_period
+                else datetime.now().year
+            )
             where_clause = f"dt.Year = {year}"
-            
+
             # Detect generation source from query
             generation_source = self._detect_generation_source(original_query)
             if generation_source:
                 logger.info(f"Detected generation source: {generation_source}")
-                where_clause = self._add_source_filtering(where_clause, generation_source)
-            
+                where_clause = self._add_source_filtering(
+                    where_clause, generation_source
+                )
+
             # Add entity filter if not "all" query
-            if not ("all" in original_query.lower() and any(word in original_query.lower() for word in ["regions", "states"])):
+            if not (
+                "all" in original_query.lower()
+                and any(
+                    word in original_query.lower() for word in ["regions", "states"]
+                )
+            ):
                 if analysis.entities:
                     # Use the first entity found
                     entity = analysis.entities[0]
                     where_clause += f" AND d.{table_config['name_column']} = '{entity}'"
-            
+
             # Create separate WHERE clauses for current and previous data
             current_where_clause = where_clause
-            previous_where_clause = where_clause.replace(f"dt.Year = {year}", f"dt.Year = {year - 1}")
-            
+            previous_where_clause = where_clause.replace(
+                f"dt.Year = {year}", f"dt.Year = {year - 1}"
+            )
+
             # Select appropriate template
-            template_key = f'{growth_type}_growth_query'
+            template_key = f"{growth_type}_growth_query"
             if template_key in self.sql_templates:
                 template = self.sql_templates[template_key]
-                
+
                 # Generate dynamic column aliases
-                current_alias, previous_alias = self._generate_growth_column_aliases(energy_column, growth_type)
-                
+                current_alias, previous_alias = self._generate_growth_column_aliases(
+                    energy_column, growth_type
+                )
+
                 sql = template.format(
                     table=table,
                     energy_column=energy_column,
-                    join_clause=table_config['join_clause'],
+                    join_clause=table_config["join_clause"],
                     where_clause=current_where_clause,
                     previous_where_clause=previous_where_clause,
                     aggregation_function=aggregation_function,
-                    region_column=table_config['name_column'],
+                    region_column=table_config["name_column"],
                     current_alias=current_alias,
-                    previous_alias=previous_alias
+                    previous_alias=previous_alias,
                 )
-                logger.info(f"Generated {growth_type} growth SQL with dynamic aliases: {sql[:100]}...")
+                logger.info(
+                    f"Generated {growth_type} growth SQL with dynamic aliases: {sql[:100]}..."
+                )
                 return sql
             else:
-                logger.warning(f"Template {template_key} not found, falling back to monthly")
-                template = self.sql_templates['monthly_growth_query']
-                
+                logger.warning(
+                    f"Template {template_key} not found, falling back to monthly"
+                )
+                template = self.sql_templates["monthly_growth_query"]
+
                 # Generate dynamic column aliases for fallback
-                current_alias, previous_alias = self._generate_growth_column_aliases(energy_column, "monthly")
-                
+                current_alias, previous_alias = self._generate_growth_column_aliases(
+                    energy_column, "monthly"
+                )
+
                 sql = template.format(
                     table=table,
                     energy_column=energy_column,
-                    join_clause=table_config['join_clause'],
+                    join_clause=table_config["join_clause"],
                     where_clause=current_where_clause,
                     previous_where_clause=previous_where_clause,
                     aggregation_function=aggregation_function,
-                    region_column=table_config['name_column'],
+                    region_column=table_config["name_column"],
                     current_alias=current_alias,
-                    previous_alias=previous_alias
+                    previous_alias=previous_alias,
                 )
-                logger.info(f"Generated fallback monthly growth SQL with dynamic aliases: {sql[:100]}...")
+                logger.info(
+                    f"Generated fallback monthly growth SQL with dynamic aliases: {sql[:100]}..."
+                )
                 return sql
-        
+
         # Look for template based on query type and intent
         template_key = None
-        if analysis.query_type.value == 'exchange_detail':
-            template_key = 'exchange_query'
-        elif analysis.query_type.value == 'exchange':
-            template_key = 'country_daily_exchange_query'
-        elif analysis.query_type.value == 'transmission':
+        if analysis.query_type.value == "exchange_detail":
+            template_key = "exchange_query"
+        elif analysis.query_type.value == "exchange":
+            template_key = "country_daily_exchange_query"
+        elif analysis.query_type.value == "transmission":
             original_query_lower = original_query.lower() if original_query else ""
             # Check if this is an international transmission query
-            international_keywords = ['international', 'india-nepal', 'india-bhutan', 'india-bangladesh', 'nepal', 'bhutan', 'bangladesh']
-            if any(keyword in original_query_lower for keyword in international_keywords):
-                template_key = 'international_transmission_query'
+            international_keywords = [
+                "international",
+                "india-nepal",
+                "india-bhutan",
+                "india-bangladesh",
+                "nepal",
+                "bhutan",
+                "bangladesh",
+            ]
+            if any(
+                keyword in original_query_lower for keyword in international_keywords
+            ):
+                template_key = "international_transmission_query"
             else:
-                template_key = 'transmission_query'
-        elif analysis.query_type.value == 'generation':
+                template_key = "transmission_query"
+        elif analysis.query_type.value == "generation":
             # Check if this is a region-level generation query
             original_query_lower = original_query.lower() if original_query else ""
-            if any(word in original_query_lower for word in ['region', 'regions', 'all regions']):
-                template_key = 'region_generation_query'
+            if any(
+                word in original_query_lower
+                for word in ["region", "regions", "all regions"]
+            ):
+                template_key = "region_generation_query"
             else:
-                template_key = 'generation_query'
-        elif analysis.query_type.value == 'state':
-            template_key = 'state_query'
-        elif analysis.query_type.value == 'region':
-            template_key = 'region_query'
-        elif analysis.query_type.value == 'time_block_generation':
-            template_key = 'time_block_generation_query'
-        elif analysis.query_type.value == 'time_block':
-            template_key = 'time_block_query'
-        elif analysis.intent.value == 'trend_analysis':
+                template_key = "generation_query"
+        elif analysis.query_type.value == "state":
+            template_key = "state_query"
+        elif analysis.query_type.value == "region":
+            template_key = "region_query"
+        elif analysis.query_type.value == "time_block_generation":
+            template_key = "time_block_generation_query"
+        elif analysis.query_type.value == "time_block":
+            template_key = "time_block_query"
+        elif analysis.intent.value == "trend_analysis":
             # Dynamic trend analysis - determine template based on query content
             original_query_lower = original_query.lower() if original_query else ""
-            
+
             # STEP 1: Determine if it's a growth query or aggregation query
-            is_growth_query = any(word in original_query_lower for word in ['growth', 'increase', 'decrease', 'change', 'trend'])
-            is_aggregation_query = any(word in original_query_lower for word in ['total', 'sum', 'average', 'avg', 'maximum', 'max', 'minimum', 'min', 'aggregate'])
-            
+            is_growth_query = any(
+                word in original_query_lower
+                for word in ["growth", "increase", "decrease", "change", "trend"]
+            )
+            is_aggregation_query = any(
+                word in original_query_lower
+                for word in [
+                    "total",
+                    "sum",
+                    "average",
+                    "avg",
+                    "maximum",
+                    "max",
+                    "minimum",
+                    "min",
+                    "aggregate",
+                ]
+            )
+
             # If both are detected, prioritize growth (growth queries are more specific)
             if is_growth_query and is_aggregation_query:
                 is_aggregation_query = False
-                logger.info(f"Both growth and aggregation detected, prioritizing growth query")
-            
+                logger.info(
+                    f"Both growth and aggregation detected, prioritizing growth query"
+                )
+
             # STEP 2: Determine time period
             time_period = "monthly"  # Default
-            if any(word in original_query_lower for word in ['quarterly', 'quarter', 'q1', 'q2', 'q3', 'q4']):
+            if any(
+                word in original_query_lower
+                for word in ["quarterly", "quarter", "q1", "q2", "q3", "q4"]
+            ):
                 time_period = "quarterly"
-            elif any(word in original_query_lower for word in ['yearly', 'annual', 'year over year']):
+            elif any(
+                word in original_query_lower
+                for word in ["yearly", "annual", "year over year"]
+            ):
                 time_period = "yearly"
-            elif any(word in original_query_lower for word in ['weekly', 'week']):
+            elif any(word in original_query_lower for word in ["weekly", "week"]):
                 time_period = "weekly"
-            elif any(word in original_query_lower for word in ['daily', 'day']):
+            elif any(word in original_query_lower for word in ["daily", "day"]):
                 time_period = "daily"
-            elif any(word in original_query_lower for word in ['monthly', 'month over month', 'per month']):
+            elif any(
+                word in original_query_lower
+                for word in ["monthly", "month over month", "per month"]
+            ):
                 time_period = "monthly"
-            
-            logger.info(f"Trend analysis - Growth: {is_growth_query}, Aggregation: {is_aggregation_query}, Time period: {time_period}")
-            
+
+            logger.info(
+                f"Trend analysis - Growth: {is_growth_query}, Aggregation: {is_aggregation_query}, Time period: {time_period}"
+            )
+
             # STEP 3: Select appropriate template
             if is_growth_query:
                 # Use growth template with time period
-                template_key = f'{time_period}_growth_query'
+                template_key = f"{time_period}_growth_query"
                 logger.info(f"Selected growth template: {template_key}")
             elif is_aggregation_query:
                 # Use aggregation template based on query type
-                if analysis.query_type.value == 'region':
-                    template_key = 'region_query'
-                elif analysis.query_type.value == 'state':
-                    template_key = 'state_query'
-                elif analysis.query_type.value == 'generation':
-                    template_key = 'region_generation_query'
+                if analysis.query_type.value == "region":
+                    template_key = "region_query"
+                elif analysis.query_type.value == "state":
+                    template_key = "state_query"
+                elif analysis.query_type.value == "generation":
+                    template_key = "region_generation_query"
                 else:
-                    template_key = 'region_query'  # Default
+                    template_key = "region_query"  # Default
                 logger.info(f"Selected aggregation template: {template_key}")
             else:
                 # Default to region query if unclear
-                template_key = 'region_query'
+                template_key = "region_query"
                 logger.info(f"Default template selected: {template_key}")
         else:
-            template_key = 'region_query'  # Default
-        
-        logger.info(f"Looking for template: {template_key}, Intent: {analysis.intent.value}, Keywords: {analysis.detected_keywords}")
-        logger.info(f"Query type: {analysis.query_type.value}, Template key: {template_key}")
+            template_key = "region_query"  # Default
+
+        logger.info(
+            f"Looking for template: {template_key}, Intent: {analysis.intent.value}, Keywords: {analysis.detected_keywords}"
+        )
+        logger.info(
+            f"Query type: {analysis.query_type.value}, Template key: {template_key}"
+        )
         logger.info(f"Available templates: {list(self.sql_templates.keys())}")
-        logger.info(f"🔍 TEMPLATE SELECTION: query_type={analysis.query_type.value}, template_key={template_key}")
-        
+        logger.info(
+            f"🔍 TEMPLATE SELECTION: query_type={analysis.query_type.value}, template_key={template_key}"
+        )
+
         if template_key in self.sql_templates:
             logger.info(f"✅ Template found: {template_key}")
             template = self.sql_templates[template_key]
-            
+
             # Special handling for exchange queries - they don't need energy_column processing
-            if template_key == 'exchange_query':
+            if template_key == "exchange_query":
                 # Build where clause based on extracted entities and user mappings
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
-                
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
+
                 sql = template.format(where_clause=where_clause)
                 logger.info(f"Generated exchange SQL: {sql[:100]}...")
                 return sql
-            
+
             # Special handling for generation queries - they don't need energy_column processing
-            if template_key == 'generation_query':
+            if template_key == "generation_query":
                 # Build where clause based on extracted entities and user mappings
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
-                
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
+
                 # Detect and add source filtering dynamically
                 generation_source = self._detect_generation_source(original_query)
                 if generation_source:
-                    logger.info(f"Detected generation source for generation query: {generation_source}")
-                    where_clause = self._add_source_filtering(where_clause, generation_source)
-                
+                    logger.info(
+                        f"Detected generation source for generation query: {generation_source}"
+                    )
+                    where_clause = self._add_source_filtering(
+                        where_clause, generation_source
+                    )
+
                 sql = template.format(where_clause=where_clause)
                 logger.info(f"Generated generation SQL: {sql[:100]}...")
                 return sql
-            
+
             # Special handling for region generation queries - they need source filtering
-            if template_key == 'region_generation_query':
+            if template_key == "region_generation_query":
                 # Build where clause based on extracted entities and user mappings
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
-                
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
+
                 # Detect and add source filtering dynamically
                 generation_source = self._detect_generation_source(original_query)
                 if generation_source:
-                    logger.info(f"Detected generation source for region query: {generation_source}")
-                    where_clause = self._add_source_filtering(where_clause, generation_source)
-                
+                    logger.info(
+                        f"Detected generation source for region query: {generation_source}"
+                    )
+                    where_clause = self._add_source_filtering(
+                        where_clause, generation_source
+                    )
+
                 sql = template.format(where_clause=where_clause)
                 logger.info(f"Generated region generation SQL: {sql[:100]}...")
                 return sql
-            
+
             # Special handling for international transmission queries - they don't need energy_column processing
-            if template_key == 'international_transmission_query':
+            if template_key == "international_transmission_query":
                 # Build where clause based on extracted entities and user mappings
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
-                
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
+
                 # Determine aggregation function and energy column for international transmission
                 aggregation_function = "SUM"  # Default
-                if "maximum" in analysis.detected_keywords or "max" in analysis.detected_keywords:
+                if (
+                    "maximum" in analysis.detected_keywords
+                    or "max" in analysis.detected_keywords
+                ):
                     aggregation_function = "MAX"
-                elif "minimum" in analysis.detected_keywords or "min" in analysis.detected_keywords:
+                elif (
+                    "minimum" in analysis.detected_keywords
+                    or "min" in analysis.detected_keywords
+                ):
                     aggregation_function = "MIN"
-                elif "average" in analysis.detected_keywords or "avg" in analysis.detected_keywords:
+                elif (
+                    "average" in analysis.detected_keywords
+                    or "avg" in analysis.detected_keywords
+                ):
                     aggregation_function = "AVG"
-                
-                energy_column = "MaxLoading" if "loading" in analysis.detected_keywords else "MaxLoading"
-                column_alias = f"Maximum{energy_column}" if aggregation_function == "MAX" else f"Total{energy_column}"
-                
+
+                energy_column = (
+                    "MaxLoading"
+                    if "loading" in analysis.detected_keywords
+                    else "MaxLoading"
+                )
+                column_alias = (
+                    f"Maximum{energy_column}"
+                    if aggregation_function == "MAX"
+                    else f"Total{energy_column}"
+                )
+
                 sql = template.format(
                     aggregation_function=aggregation_function,
                     energy_column=energy_column,
                     column_alias=column_alias,
-                    where_clause=where_clause
+                    where_clause=where_clause,
                 )
                 logger.info(f"Generated international transmission SQL: {sql[:100]}...")
                 return sql
-            
+
             # Special handling for regular transmission queries - they don't need energy_column processing
-            if template_key == 'transmission_query':
+            if template_key == "transmission_query":
                 # Build where clause based on extracted entities and user mappings
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
-                
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
+
                 # Determine aggregation function and energy column for transmission
                 aggregation_function = "SUM"  # Default
-                if "maximum" in analysis.detected_keywords or "max" in analysis.detected_keywords:
+                if (
+                    "maximum" in analysis.detected_keywords
+                    or "max" in analysis.detected_keywords
+                ):
                     aggregation_function = "MAX"
-                elif "minimum" in analysis.detected_keywords or "min" in analysis.detected_keywords:
+                elif (
+                    "minimum" in analysis.detected_keywords
+                    or "min" in analysis.detected_keywords
+                ):
                     aggregation_function = "MIN"
-                elif "average" in analysis.detected_keywords or "avg" in analysis.detected_keywords:
+                elif (
+                    "average" in analysis.detected_keywords
+                    or "avg" in analysis.detected_keywords
+                ):
                     aggregation_function = "AVG"
-                
-                energy_column = "MaxImport" if "import" in analysis.detected_keywords else "MaxExport" if "export" in analysis.detected_keywords else "MaxImport"
-                column_alias = f"Maximum{energy_column}" if aggregation_function == "MAX" else f"Total{energy_column}"
-                
+
+                energy_column = (
+                    "MaxImport"
+                    if "import" in analysis.detected_keywords
+                    else (
+                        "MaxExport"
+                        if "export" in analysis.detected_keywords
+                        else "MaxImport"
+                    )
+                )
+                column_alias = (
+                    f"Maximum{energy_column}"
+                    if aggregation_function == "MAX"
+                    else f"Total{energy_column}"
+                )
+
                 sql = template.format(
                     aggregation_function=aggregation_function,
                     energy_column=energy_column,
                     column_alias=column_alias,
-                    where_clause=where_clause
+                    where_clause=where_clause,
                 )
                 logger.info(f"Generated transmission SQL: {sql[:100]}...")
                 return sql
-            
+
             # Special handling for time block queries - they don't need energy_column processing
-            if template_key == 'time_block_query':
+            if template_key == "time_block_query":
                 # Build where clause based on extracted entities and user mappings
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
-                
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
+
                 # Determine aggregation function and energy column for time block
-                aggregation_function = "MAX" if "maximum" in analysis.detected_keywords or "max" in analysis.detected_keywords else "SUM"
-                energy_column = "TotalGeneration" if "generation" in analysis.detected_keywords else "DemandMet"
-                column_alias = f"Maximum{energy_column}" if aggregation_function == "MAX" else f"Total{energy_column}"
-                
+                aggregation_function = (
+                    "MAX"
+                    if "maximum" in analysis.detected_keywords
+                    or "max" in analysis.detected_keywords
+                    else "SUM"
+                )
+                energy_column = (
+                    "TotalGeneration"
+                    if "generation" in analysis.detected_keywords
+                    else "DemandMet"
+                )
+                column_alias = (
+                    f"Maximum{energy_column}"
+                    if aggregation_function == "MAX"
+                    else f"Total{energy_column}"
+                )
+
                 sql = template.format(
                     aggregation_function=aggregation_function,
                     energy_column=energy_column,
                     column_alias=column_alias,
-                    where_clause=where_clause
+                    where_clause=where_clause,
                 )
                 logger.info(f"Generated time block SQL: {sql[:100]}...")
                 return sql
-            
+
             # Special handling for country daily exchange queries - they don't need energy_column processing
-            if template_key == 'country_daily_exchange_query':
+            if template_key == "country_daily_exchange_query":
                 # Build where clause based on extracted entities and user mappings
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
-                
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
+
                 # Determine aggregation function and energy column for country daily exchange
-                aggregation_function = "SUM" if "total" in analysis.detected_keywords else "MAX" if "maximum" in analysis.detected_keywords or "peak" in analysis.detected_keywords else "SUM"
-                energy_column = "TotalEnergyExchanged" if "energy" in analysis.detected_keywords else "PeakExchange" if "peak" in analysis.detected_keywords else "TotalEnergyExchanged"
-                column_alias = f"Total{energy_column}" if aggregation_function == "SUM" else f"Maximum{energy_column}"
-                
+                aggregation_function = (
+                    "SUM"
+                    if "total" in analysis.detected_keywords
+                    else (
+                        "MAX"
+                        if "maximum" in analysis.detected_keywords
+                        or "peak" in analysis.detected_keywords
+                        else "SUM"
+                    )
+                )
+                energy_column = (
+                    "TotalEnergyExchanged"
+                    if "energy" in analysis.detected_keywords
+                    else (
+                        "PeakExchange"
+                        if "peak" in analysis.detected_keywords
+                        else "TotalEnergyExchanged"
+                    )
+                )
+                column_alias = (
+                    f"Total{energy_column}"
+                    if aggregation_function == "SUM"
+                    else f"Maximum{energy_column}"
+                )
+
                 sql = template.format(
                     aggregation_function=aggregation_function,
                     energy_column=energy_column,
                     column_alias=column_alias,
-                    where_clause=where_clause
+                    where_clause=where_clause,
                 )
                 logger.info(f"Generated country daily exchange SQL: {sql[:100]}...")
                 return sql
-            
+
             # Dynamic template processing for trend analysis and other queries
-            if template_key in ['region_query', 'state_query']:
+            if template_key in ["region_query", "state_query"]:
                 # Build where clause based on extracted entities and user mappings
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
-                
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
+
                 # Determine aggregation function dynamically
-                aggregation_function = self._determine_aggregation_function(original_query, analysis)
-                
+                aggregation_function = self._determine_aggregation_function(
+                    original_query, analysis
+                )
+
                 # Get energy column from schema linker
-                if hasattr(context, 'schema_linker') and context.schema_linker:
-                    table_name = "FactAllIndiaDailySummary" if analysis.query_type.value == 'region' else "FactStateDailyEnergy"
-                    energy_column = context.schema_linker.get_best_column_match(
-                        user_query=original_query,
-                        table_name=table_name,
-                        query_type="energy"
-                    ) or "EnergyMet"
+                if hasattr(context, "schema_linker") and context.schema_linker:
+                    table_name = (
+                        "FactAllIndiaDailySummary"
+                        if analysis.query_type.value == "region"
+                        else "FactStateDailyEnergy"
+                    )
+                    energy_column = (
+                        context.schema_linker.get_best_column_match(
+                            user_query=original_query,
+                            table_name=table_name,
+                            query_type="energy",
+                        )
+                        or "EnergyMet"
+                    )
                 else:
                     energy_column = "EnergyMet"
-                
+
                 # Generate column alias
-                column_alias = self._generate_column_alias(original_query, energy_column, aggregation_function)
-                
+                column_alias = self._generate_column_alias(
+                    original_query, energy_column, aggregation_function
+                )
+
                 # Check if this is a trend analysis query that needs time-based grouping
-                if analysis.intent.value == 'trend_analysis':
+                if analysis.intent.value == "trend_analysis":
                     # Determine if it's growth or aggregation
-                    original_query_lower = original_query.lower() if original_query else ""
-                    is_growth_query = any(word in original_query_lower for word in ['growth', 'increase', 'decrease', 'change', 'trend'])
-                    is_aggregation_query = any(word in original_query_lower for word in ['total', 'sum', 'average', 'avg', 'maximum', 'max', 'minimum', 'min', 'aggregate'])
-                    
+                    original_query_lower = (
+                        original_query.lower() if original_query else ""
+                    )
+                    is_growth_query = any(
+                        word in original_query_lower
+                        for word in [
+                            "growth",
+                            "increase",
+                            "decrease",
+                            "change",
+                            "trend",
+                        ]
+                    )
+                    is_aggregation_query = any(
+                        word in original_query_lower
+                        for word in [
+                            "total",
+                            "sum",
+                            "average",
+                            "avg",
+                            "maximum",
+                            "max",
+                            "minimum",
+                            "min",
+                            "aggregate",
+                        ]
+                    )
+
                     time_period = self._determine_time_period(original_query)
-                    logger.info(f"Trend analysis detected - Growth: {is_growth_query}, Aggregation: {is_aggregation_query}, Time period: {time_period}, Aggregation: {aggregation_function}")
-                    
+                    logger.info(
+                        f"Trend analysis detected - Growth: {is_growth_query}, Aggregation: {is_aggregation_query}, Time period: {time_period}, Aggregation: {aggregation_function}"
+                    )
+
                     if is_growth_query:
                         # For growth queries, use the growth template (handled by template selection above)
                         # This should have been selected as {time_period}_growth_query
@@ -973,7 +1268,7 @@ class SQLAssembler:
                     elif is_aggregation_query:
                         # For aggregation queries, use time-based grouping
                         logger.info(f"Aggregation query - using time-based grouping")
-                        
+
                         # Use time-based grouping for aggregation trend analysis
                         if time_period == "monthly":
                             sql = f"""
@@ -1025,8 +1320,10 @@ class SQLAssembler:
                                 GROUP BY d.{table_config['name_column']}, dt.Year
                                 ORDER BY d.{table_config['name_column']}, dt.Year
                             """
-                        
-                        logger.info(f"Generated aggregation trend analysis SQL: {sql[:100]}...")
+
+                        logger.info(
+                            f"Generated aggregation trend analysis SQL: {sql[:100]}..."
+                        )
                         return sql
                     else:
                         # Default to regular template processing
@@ -1035,7 +1332,7 @@ class SQLAssembler:
                             aggregation_function=aggregation_function,
                             energy_column=energy_column,
                             column_alias=column_alias,
-                            where_clause=where_clause
+                            where_clause=where_clause,
                         )
                         logger.info(f"Generated default SQL: {sql[:100]}...")
                         return sql
@@ -1045,66 +1342,96 @@ class SQLAssembler:
                         aggregation_function=aggregation_function,
                         energy_column=energy_column,
                         column_alias=column_alias,
-                        where_clause=where_clause
+                        where_clause=where_clause,
                     )
                     logger.info(f"Generated regular SQL: {sql[:100]}...")
                     return sql
-            
+
             # Special handling for time block generation queries - they don't need energy_column processing
-            if template_key == 'time_block_generation_query':
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
+            if template_key == "time_block_generation_query":
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
                 sql = template.format(where_clause=where_clause)
                 logger.info(f"Generated time block generation SQL: {sql[:100]}...")
                 return sql
-            
+
             # Special handling for state queries - they need energy_column processing
-            if template_key == 'state_query':
+            if template_key == "state_query":
                 # Build where clause based on extracted entities and user mappings
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
-                
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
+
                 # Determine aggregation function based on query intent
                 aggregation_function = "SUM"
-                if any(word in analysis.detected_keywords for word in ["maximum", "max", "highest"]):
+                if any(
+                    word in analysis.detected_keywords
+                    for word in ["maximum", "max", "highest"]
+                ):
                     aggregation_function = "MAX"
-                elif any(word in analysis.detected_keywords for word in ["minimum", "min", "lowest"]):
+                elif any(
+                    word in analysis.detected_keywords
+                    for word in ["minimum", "min", "lowest"]
+                ):
                     aggregation_function = "MIN"
-                elif any(word in analysis.detected_keywords for word in ["average", "avg", "mean"]):
+                elif any(
+                    word in analysis.detected_keywords
+                    for word in ["average", "avg", "mean"]
+                ):
                     aggregation_function = "AVG"
-                
+
                 # Additional check for aggregation keywords in the original query
                 original_query_lower = original_query.lower() if original_query else ""
-                if any(word in original_query_lower for word in ["maximum", "max", "highest"]):
+                if any(
+                    word in original_query_lower
+                    for word in ["maximum", "max", "highest"]
+                ):
                     aggregation_function = "MAX"
-                elif any(word in original_query_lower for word in ["minimum", "min", "lowest"]):
+                elif any(
+                    word in original_query_lower
+                    for word in ["minimum", "min", "lowest"]
+                ):
                     aggregation_function = "MIN"
-                elif any(word in original_query_lower for word in ["average", "avg", "mean"]):
+                elif any(
+                    word in original_query_lower for word in ["average", "avg", "mean"]
+                ):
                     aggregation_function = "AVG"
                 elif any(word in original_query_lower for word in ["total", "sum"]):
                     aggregation_function = "SUM"
-                
+
                 # Check if monthly grouping is needed
                 original_query_lower = original_query.lower() if original_query else ""
-                is_monthly_query = any(word in original_query_lower for word in ['monthly', 'month', 'by month'])
-                
+                is_monthly_query = any(
+                    word in original_query_lower
+                    for word in ["monthly", "month", "by month"]
+                )
+
                 # Use schema linker to get the correct column
-                if hasattr(context, 'schema_linker') and context.schema_linker:
+                if hasattr(context, "schema_linker") and context.schema_linker:
                     table_name = "FactStateDailyEnergy"
                     energy_column = context.schema_linker.get_best_column_match(
                         user_query=original_query,
                         table_name=table_name,
-                        query_type="energy"  # Default for state queries
+                        query_type="energy",  # Default for state queries
                     )
-                    
-                    logger.info(f"🔍 SCHEMA LINKER RESULT - Table: {table_name}, Energy Column: {energy_column}")
-                    
+
+                    logger.info(
+                        f"🔍 SCHEMA LINKER RESULT - Table: {table_name}, Energy Column: {energy_column}"
+                    )
+
                     # CRITICAL CHANGE: No more fallbacks. If no column is found, fail explicitly.
                     if not energy_column:
-                        logger.error(f"No column match found for state query: {original_query}. Clarification required.")
+                        logger.error(
+                            f"No column match found for state query: {original_query}. Clarification required."
+                        )
                         return None
-                    
+
                     # Generate informative column alias
-                    column_alias = self._generate_column_alias(original_query, energy_column, aggregation_function)
-                    
+                    column_alias = self._generate_column_alias(
+                        original_query, energy_column, aggregation_function
+                    )
+
                     # Modify template based on whether monthly grouping is needed
                     if is_monthly_query:
                         # Use monthly grouping template
@@ -1124,67 +1451,105 @@ class SQLAssembler:
                             aggregation_function=aggregation_function,
                             energy_column=energy_column,
                             column_alias=column_alias,
-                            where_clause=where_clause
+                            where_clause=where_clause,
                         )
                         logger.info(f"🔍 GENERATED REGULAR SQL: {sql[:200]}...")
-                    
-                    logger.info(f"Generated state SQL (monthly={is_monthly_query}): {sql[:100]}...")
+
+                    logger.info(
+                        f"Generated state SQL (monthly={is_monthly_query}): {sql[:100]}..."
+                    )
                     return sql
                 else:
-                    logger.error(f"No schema linker available for state query. Clarification required.")
+                    logger.error(
+                        f"No schema linker available for state query. Clarification required."
+                    )
                     return None
-            
+
             # Special handling for region queries - they need energy_column processing
-            if template_key == 'region_query':
-                logger.info(f"🔍 REGION QUERY HANDLING STARTED - Query: '{original_query}'")
-                logger.info(f"REGION QUERY HANDLING: Processing region query with template_key={template_key}")
+            if template_key == "region_query":
+                logger.info(
+                    f"🔍 REGION QUERY HANDLING STARTED - Query: '{original_query}'"
+                )
+                logger.info(
+                    f"REGION QUERY HANDLING: Processing region query with template_key={template_key}"
+                )
                 # Build where clause based on extracted entities and user mappings
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
-                
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
+
                 # Determine aggregation function based on query intent
                 aggregation_function = "SUM"
-                if any(word in analysis.detected_keywords for word in ["maximum", "max", "highest"]):
+                if any(
+                    word in analysis.detected_keywords
+                    for word in ["maximum", "max", "highest"]
+                ):
                     aggregation_function = "MAX"
-                elif any(word in analysis.detected_keywords for word in ["minimum", "min", "lowest"]):
+                elif any(
+                    word in analysis.detected_keywords
+                    for word in ["minimum", "min", "lowest"]
+                ):
                     aggregation_function = "MIN"
-                elif any(word in analysis.detected_keywords for word in ["average", "avg", "mean"]):
+                elif any(
+                    word in analysis.detected_keywords
+                    for word in ["average", "avg", "mean"]
+                ):
                     aggregation_function = "AVG"
-                
+
                 # Additional check for aggregation keywords in the original query
                 original_query_lower = original_query.lower() if original_query else ""
-                if any(word in original_query_lower for word in ["maximum", "max", "highest"]):
+                if any(
+                    word in original_query_lower
+                    for word in ["maximum", "max", "highest"]
+                ):
                     aggregation_function = "MAX"
-                elif any(word in original_query_lower for word in ["minimum", "min", "lowest"]):
+                elif any(
+                    word in original_query_lower
+                    for word in ["minimum", "min", "lowest"]
+                ):
                     aggregation_function = "MIN"
-                elif any(word in original_query_lower for word in ["average", "avg", "mean"]):
+                elif any(
+                    word in original_query_lower for word in ["average", "avg", "mean"]
+                ):
                     aggregation_function = "AVG"
                 elif any(word in original_query_lower for word in ["total", "sum"]):
                     aggregation_function = "SUM"
-                
+
                 # Check if monthly grouping is needed
                 original_query_lower = original_query.lower() if original_query else ""
-                is_monthly_query = any(word in original_query_lower for word in ['monthly', 'month', 'by month'])
-                logger.info(f"🔍 REGION MONTHLY DETECTION - Query: '{original_query}', Lower: '{original_query_lower}', Is Monthly: {is_monthly_query}")
-                
+                is_monthly_query = any(
+                    word in original_query_lower
+                    for word in ["monthly", "month", "by month"]
+                )
+                logger.info(
+                    f"🔍 REGION MONTHLY DETECTION - Query: '{original_query}', Lower: '{original_query_lower}', Is Monthly: {is_monthly_query}"
+                )
+
                 # Use schema linker to get the correct column
-                if hasattr(context, 'schema_linker') and context.schema_linker:
+                if hasattr(context, "schema_linker") and context.schema_linker:
                     table_name = "FactAllIndiaDailySummary"
                     energy_column = context.schema_linker.get_best_column_match(
                         user_query=original_query,
                         table_name=table_name,
-                        query_type="energy"  # Default for region queries
+                        query_type="energy",  # Default for region queries
                     )
-                    
-                    logger.info(f"🔍 REGION SCHEMA LINKER RESULT - Table: {table_name}, Energy Column: {energy_column}")
-                    
+
+                    logger.info(
+                        f"🔍 REGION SCHEMA LINKER RESULT - Table: {table_name}, Energy Column: {energy_column}"
+                    )
+
                     # CRITICAL CHANGE: No more fallbacks. If no column is found, fail explicitly.
                     if not energy_column:
-                        logger.error(f"No column match found for region query: {original_query}. Clarification required.")
+                        logger.error(
+                            f"No column match found for region query: {original_query}. Clarification required."
+                        )
                         return None
-                    
+
                     # Generate informative column alias
-                    column_alias = self._generate_column_alias(original_query, energy_column, aggregation_function)
-                    
+                    column_alias = self._generate_column_alias(
+                        original_query, energy_column, aggregation_function
+                    )
+
                     # Modify template based on whether monthly grouping is needed
                     if is_monthly_query:
                         # Use monthly grouping template
@@ -1204,88 +1569,132 @@ class SQLAssembler:
                             aggregation_function=aggregation_function,
                             energy_column=energy_column,
                             column_alias=column_alias,
-                            where_clause=where_clause
+                            where_clause=where_clause,
                         )
                         logger.info(f"🔍 GENERATED REGION REGULAR SQL: {sql[:200]}...")
-                    
-                    logger.info(f"Generated region SQL (monthly={is_monthly_query}): {sql[:100]}...")
+
+                    logger.info(
+                        f"Generated region SQL (monthly={is_monthly_query}): {sql[:100]}..."
+                    )
                     return sql
                 else:
-                    logger.error(f"No schema linker available for region query. Clarification required.")
+                    logger.error(
+                        f"No schema linker available for region query. Clarification required."
+                    )
                     return None
-            
+
             # Determine aggregation function based on query intent
             aggregation_function = "SUM"
-            if any(word in analysis.detected_keywords for word in ["maximum", "max", "highest"]):
+            if any(
+                word in analysis.detected_keywords
+                for word in ["maximum", "max", "highest"]
+            ):
                 aggregation_function = "MAX"
-            elif any(word in analysis.detected_keywords for word in ["minimum", "min", "lowest"]):
+            elif any(
+                word in analysis.detected_keywords
+                for word in ["minimum", "min", "lowest"]
+            ):
                 aggregation_function = "MIN"
-            elif any(word in analysis.detected_keywords for word in ["average", "avg", "mean"]):
+            elif any(
+                word in analysis.detected_keywords
+                for word in ["average", "avg", "mean"]
+            ):
                 aggregation_function = "AVG"
-            
+
             # Determine energy column based on query keywords and business rules
             energy_column = ""  # No default - will be set by similarity matching
             query_type = "energy"  # Default
-            
+
             if "evening" in analysis.detected_keywords:
                 query_type = "evening_demand"
-            elif "drawal" in analysis.detected_keywords or "schedule" in analysis.detected_keywords:
+            elif (
+                "drawal" in analysis.detected_keywords
+                or "schedule" in analysis.detected_keywords
+            ):
                 query_type = "drawal_schedule"
-            elif "actual" in analysis.detected_keywords and "drawal" in analysis.detected_keywords:
+            elif (
+                "actual" in analysis.detected_keywords
+                and "drawal" in analysis.detected_keywords
+            ):
                 query_type = "actual_drawal"
             elif "shortage" in analysis.detected_keywords:
                 query_type = "shortage"
-            elif "transmission" in analysis.detected_keywords or "flow" in analysis.detected_keywords:
+            elif (
+                "transmission" in analysis.detected_keywords
+                or "flow" in analysis.detected_keywords
+            ):
                 query_type = "transmission"
-            elif "import" in analysis.detected_keywords or "export" in analysis.detected_keywords:
+            elif (
+                "import" in analysis.detected_keywords
+                or "export" in analysis.detected_keywords
+            ):
                 query_type = "transmission"  # Import/export are transmission operations
-            elif "exchange" in analysis.detected_keywords or "trade" in analysis.detected_keywords:
+            elif (
+                "exchange" in analysis.detected_keywords
+                or "trade" in analysis.detected_keywords
+            ):
                 query_type = "exchange"
             elif "outage" in analysis.detected_keywords:
                 query_type = "outage"
-            elif "ratio" in analysis.detected_keywords or "share" in analysis.detected_keywords:
+            elif (
+                "ratio" in analysis.detected_keywords
+                or "share" in analysis.detected_keywords
+            ):
                 query_type = "ratio"
             elif "frequency" in analysis.detected_keywords:
                 query_type = "percentage"  # Frequency durations are percentages
-            elif "percentage" in analysis.detected_keywords or "%" in analysis.detected_keywords:
+            elif (
+                "percentage" in analysis.detected_keywords
+                or "%" in analysis.detected_keywords
+            ):
                 query_type = "percentage"
-            elif "time" in analysis.detected_keywords or "duration" in analysis.detected_keywords:
+            elif (
+                "time" in analysis.detected_keywords
+                or "duration" in analysis.detected_keywords
+            ):
                 query_type = "time"
-            elif "power" in analysis.detected_keywords or "mw" in analysis.detected_keywords:
+            elif (
+                "power" in analysis.detected_keywords
+                or "mw" in analysis.detected_keywords
+            ):
                 query_type = "power"
             elif "demand" in analysis.detected_keywords:
                 query_type = "demand"
             elif "energy" in analysis.detected_keywords:
                 query_type = "energy"
-            
+
             # Use business rules to get correct column
-            if hasattr(context, 'schema_linker') and context.schema_linker:
-                logger.info(f"Using similarity-based column matching for query: '{original_query}'")
+            if hasattr(context, "schema_linker") and context.schema_linker:
+                logger.info(
+                    f"Using similarity-based column matching for query: '{original_query}'"
+                )
                 # Determine the correct table based on query type
                 table_name = "FactAllIndiaDailySummary"  # Default for region queries
-                if analysis.query_type.value == 'state':
+                if analysis.query_type.value == "state":
                     table_name = "FactStateDailyEnergy"
-                elif analysis.query_type.value == 'generation':
+                elif analysis.query_type.value == "generation":
                     table_name = "FactDailyGenerationBreakdown"
-                elif analysis.query_type.value == 'transmission':
+                elif analysis.query_type.value == "transmission":
                     table_name = "FactTransmissionLinkFlow"
-                elif analysis.query_type.value == 'exchange':
+                elif analysis.query_type.value == "exchange":
                     table_name = "FactTransnationalExchangeDetail"
-                elif analysis.query_type.value == 'country_daily_exchange':
+                elif analysis.query_type.value == "country_daily_exchange":
                     table_name = "FactCountryDailyExchange"
-                
+
                 logger.info(f"Selected table: {table_name}, query_type: {query_type}")
-                
+
                 # Use similarity-based column matching with fallback to business rules
                 energy_column = context.schema_linker.get_best_column_match(
                     user_query=original_query,  # Pass the original query for similarity matching
                     table_name=table_name,
                     query_type=query_type,
-                    llm_provider=getattr(context, 'llm_provider', None)  # Pass LLM provider for Hook #2
+                    llm_provider=getattr(
+                        context, "llm_provider", None
+                    ),  # Pass LLM provider for Hook #2
                 )
-                
+
                 logger.info(f"Similarity-based column match result: {energy_column}")
-                
+
                 # If no column match found, return None to trigger LLM fallback
                 if not energy_column:
                     # === LLM Hook #3 – "Template Slot Filler" ===
@@ -1294,55 +1703,82 @@ class SQLAssembler:
                             table_name = analysis.main_table
                             candidate_columns = context.schema_info.get(table_name, [])
                             prompt = f"Given the natural language query '{original_query}', choose the correct column for the {{energy_column}} slot in the SQL template for the table '{table_name}' from this list: {candidate_columns}."
-                            
+
                             # For now, we'll use a simple approach without async to avoid complexity
                             # In a production system, this would be properly async
-                            logger.info(f"LLM Hook #3: Attempting slot filling for query: {original_query}")
+                            logger.info(
+                                f"LLM Hook #3: Attempting slot filling for query: {original_query}"
+                            )
                             # Note: This is a simplified version - in production, you'd want proper async handling
                             return None  # Skip for now to avoid async issues
                         except Exception as e:
                             logger.warning(f"LLM Hook #3 (Slot Filler) failed: {e}")
                             return None  # Fail template generation if LLM fails
                     else:
-                        logger.warning("Template slot 'energy_column' could not be resolved.")
+                        logger.warning(
+                            "Template slot 'energy_column' could not be resolved."
+                        )
                         return None
-                
+
                 # Generate informative column alias
-                column_alias = self._generate_column_alias(original_query, energy_column, aggregation_function)
-                
+                column_alias = self._generate_column_alias(
+                    original_query, energy_column, aggregation_function
+                )
+
                 # Get data type and appropriate aggregation functions
-                data_type = context.schema_linker._get_column_data_type(table_name, energy_column)
-                appropriate_functions = context.schema_linker._get_appropriate_aggregation_functions(data_type)
-                
+                data_type = context.schema_linker._get_column_data_type(
+                    table_name, energy_column
+                )
+                appropriate_functions = (
+                    context.schema_linker._get_appropriate_aggregation_functions(
+                        data_type
+                    )
+                )
+
                 # If no appropriate functions found, return None
                 if not appropriate_functions:
-                    logger.warning(f"No appropriate aggregation functions found for column {energy_column}")
+                    logger.warning(
+                        f"No appropriate aggregation functions found for column {energy_column}"
+                    )
                     return None
-                
+
                 # Use the first appropriate function or the detected one
                 if aggregation_function not in appropriate_functions:
                     aggregation_function = appropriate_functions[0]
-                
-                logger.info(f"Final column: {energy_column}, aggregation: {aggregation_function}, alias: {column_alias}")
-                
+
+                logger.info(
+                    f"Final column: {energy_column}, aggregation: {aggregation_function}, alias: {column_alias}"
+                )
+
                 # Build where clause based on extracted entities and user mappings
-                where_clause = self._build_where_clause_from_entities(analysis, context.user_mappings)
-                
+                where_clause = self._build_where_clause_from_entities(
+                    analysis, context.user_mappings
+                )
+
                 # Generate informative column alias
-                column_alias = self._generate_column_alias(original_query, energy_column, aggregation_function)
-                
-                sql = template.format(where_clause=where_clause, aggregation_function=aggregation_function, energy_column=energy_column, column_alias=column_alias)
-                logger.info(f"Generated regular SQL with {aggregation_function} aggregation and {energy_column} column: {sql[:100]}...")
+                column_alias = self._generate_column_alias(
+                    original_query, energy_column, aggregation_function
+                )
+
+                sql = template.format(
+                    where_clause=where_clause,
+                    aggregation_function=aggregation_function,
+                    energy_column=energy_column,
+                    column_alias=column_alias,
+                )
+                logger.info(
+                    f"Generated regular SQL with {aggregation_function} aggregation and {energy_column} column: {sql[:100]}..."
+                )
                 return sql
             else:
                 logger.info(f"Using fallback logic - schema_linker not available")
                 # No fallback logic - return None if no schema linker available
                 logger.warning(f"No schema linker available, cannot determine column")
                 return None
-        
+
         logger.warning(f"No template found for key: {template_key}")
         return None
-    
+
     def _generate_with_llm(self, prompt: str) -> Optional[str]:
         """
         Generate SQL using LLM (placeholder for future implementation).
@@ -1350,118 +1786,160 @@ class SQLAssembler:
         # This would integrate with OpenAI or other LLM providers
         # For now, return None to use templates
         return None
-    
+
     def _build_where_clause(self, user_mappings: List[Dict[str, Any]]) -> str:
         """
         Build WHERE clause based on user mappings.
         """
         if not user_mappings:
             return ""
-        
+
         conditions = []
         for mapping in user_mappings:
-            table_name = mapping['dimension_table']
+            table_name = mapping["dimension_table"]
             column_name = self._get_name_column(table_name)
-            value = mapping['dimension_value']
-            
+            value = mapping["dimension_value"]
+
             condition = f"{table_name}.{column_name} = '{value}'"
             conditions.append(condition)
-        
+
         if conditions:
             return f"WHERE {' OR '.join(conditions)}"
-        
+
         return ""
-    
-    def _build_where_clause_from_entities(self, analysis: QueryAnalysis, user_mappings: List[Dict[str, Any]]) -> str:
+
+    def _build_where_clause_from_entities(
+        self, analysis: QueryAnalysis, user_mappings: List[Dict[str, Any]]
+    ) -> str:
         """
         Build WHERE clause based on extracted entities and user mappings.
         """
         conditions = []
-        
+
         # Check if this is an "all states" or "all regions" query
-        original_query = getattr(analysis, '_original_query', '')
+        original_query = getattr(analysis, "_original_query", "")
         query_lower = original_query.lower() if original_query else ""
-        is_all_states_query = any(phrase in query_lower for phrase in ['all states', 'all state', 'every state', 'each state'])
-        is_all_regions_query = any(phrase in query_lower for phrase in ['all regions', 'all region', 'every region', 'each region'])
-        
-        logger.info(f"🔍 ALL QUERY DETECTION - Query: '{original_query}', All States: {is_all_states_query}, All Regions: {is_all_regions_query}")
-        
+        is_all_states_query = any(
+            phrase in query_lower
+            for phrase in ["all states", "all state", "every state", "each state"]
+        )
+        is_all_regions_query = any(
+            phrase in query_lower
+            for phrase in ["all regions", "all region", "every region", "each region"]
+        )
+
+        logger.info(
+            f"🔍 ALL QUERY DETECTION - Query: '{original_query}', All States: {is_all_states_query}, All Regions: {is_all_regions_query}"
+        )
+
         # Add conditions from extracted entities (but skip if it's an "all" query)
         if analysis.entities and not (is_all_states_query or is_all_regions_query):
             logger.info(f"Extracted entities: {analysis.entities}")
             for entity in analysis.entities:
-                if analysis.query_type.value == 'region':
+                if analysis.query_type.value == "region":
                     # Check if entity is a region name - map to correct database value
                     region_mapping = {
-                        'northern region': 'Northern Region',
-                        'southern region': 'Southern Region',
-                        'eastern region': 'Eastern Region',
-                        'western region': 'Western Region',
-                        'north eastern region': 'North Eastern Region'
+                        "northern region": "Northern Region",
+                        "southern region": "Southern Region",
+                        "eastern region": "Eastern Region",
+                        "western region": "Western Region",
+                        "north eastern region": "North Eastern Region",
                     }
-                    
+
                     # Try to find a match in the mapping
                     entity_lower = entity.lower()
                     mapped_region = region_mapping.get(entity_lower)
-                    
+
                     if mapped_region:
                         conditions.append(f"d.RegionName = '{mapped_region}'")
-                        logger.info(f"Added region condition with mapping: d.RegionName = '{mapped_region}' (mapped from '{entity}')")
+                        logger.info(
+                            f"Added region condition with mapping: d.RegionName = '{mapped_region}' (mapped from '{entity}')"
+                        )
                     else:
                         # Use the entity as-is if no mapping found
                         conditions.append(f"d.RegionName = '{entity}'")
-                        logger.info(f"Added region condition as-is: d.RegionName = '{entity}' (no mapping found)")
-                elif analysis.query_type.value == 'state':
+                        logger.info(
+                            f"Added region condition as-is: d.RegionName = '{entity}' (no mapping found)"
+                        )
+                elif analysis.query_type.value == "state":
                     # Check if entity is a state name - map to correct database value using centralized entity loader
                     entity_lower = entity.lower()
-                    mapped_state = self.entity_loader.get_proper_state_name(entity_lower)
-                    
+                    mapped_state = self.entity_loader.get_proper_state_name(
+                        entity_lower
+                    )
+
                     if mapped_state:
                         conditions.append(f"d.StateName = '{mapped_state}'")
-                        logger.info(f"Added state condition with mapping: d.StateName = '{mapped_state}' (mapped from '{entity}')")
+                        logger.info(
+                            f"Added state condition with mapping: d.StateName = '{mapped_state}' (mapped from '{entity}')"
+                        )
                     else:
                         # Use the entity as-is if no mapping found
                         conditions.append(f"d.StateName = '{entity}'")
-                        logger.info(f"Added state condition as-is: d.StateName = '{entity}' (no mapping found)")
-                elif analysis.query_type.value == 'exchange':
+                        logger.info(
+                            f"Added state condition as-is: d.StateName = '{entity}' (no mapping found)"
+                        )
+                elif analysis.query_type.value == "exchange":
                     # Handle exchange entities with proper mapping
-                    if entity.lower() in ['nepal', 'bhutan', 'bangladesh', 'myanmar']:
+                    if entity.lower() in ["nepal", "bhutan", "bangladesh", "myanmar"]:
                         # Map country names to correct database values
                         country_mapping = {
-                            'nepal': 'Nepal',
-                            'bhutan': 'Bhutan', 
-                            'bangladesh': 'Bangladesh',
-                            'myanmar': 'Myanmar'
+                            "nepal": "Nepal",
+                            "bhutan": "Bhutan",
+                            "bangladesh": "Bangladesh",
+                            "myanmar": "Myanmar",
                         }
-                        mapped_country = country_mapping.get(entity.lower(), entity.title())
+                        mapped_country = country_mapping.get(
+                            entity.lower(), entity.title()
+                        )
                         conditions.append(f"dc.CountryName = '{mapped_country}'")
-                        logger.info(f"Added country condition with mapping: dc.CountryName = '{mapped_country}' (mapped from '{entity}')")
-                    elif entity.upper() in ['DAM IEX', 'DAM PXIL', 'DAM HPX', 'RTM IEX', 'RTM PXIL', 'RTM HPX', 'BILATERAL', 'PPA']:
+                        logger.info(
+                            f"Added country condition with mapping: dc.CountryName = '{mapped_country}' (mapped from '{entity}')"
+                        )
+                    elif entity.upper() in [
+                        "DAM IEX",
+                        "DAM PXIL",
+                        "DAM HPX",
+                        "RTM IEX",
+                        "RTM PXIL",
+                        "RTM HPX",
+                        "BILATERAL",
+                        "PPA",
+                    ]:
                         # Exchange mechanisms are already properly mapped in entity extraction
                         conditions.append(f"dem.MechanismName = '{entity}'")
-                        logger.info(f"Added mechanism condition: dem.MechanismName = '{entity}'")
-                    elif entity.lower() in ['import', 'export']:
+                        logger.info(
+                            f"Added mechanism condition: dem.MechanismName = '{entity}'"
+                        )
+                    elif entity.lower() in ["import", "export"]:
                         # Map exchange directions to correct database values
-                        direction_mapping = {
-                            'import': 'Import',
-                            'export': 'Export'
-                        }
-                        mapped_direction = direction_mapping.get(entity.lower(), entity.title())
-                        conditions.append(f"fted.ExchangeDirection = '{mapped_direction}'")
-                        logger.info(f"Added direction condition with mapping: fted.ExchangeDirection = '{mapped_direction}' (mapped from '{entity}')")
-                elif analysis.query_type.value == 'country_daily_exchange':
+                        direction_mapping = {"import": "Import", "export": "Export"}
+                        mapped_direction = direction_mapping.get(
+                            entity.lower(), entity.title()
+                        )
+                        conditions.append(
+                            f"fted.ExchangeDirection = '{mapped_direction}'"
+                        )
+                        logger.info(
+                            f"Added direction condition with mapping: fted.ExchangeDirection = '{mapped_direction}' (mapped from '{entity}')"
+                        )
+                elif analysis.query_type.value == "country_daily_exchange":
                     # Handle country daily exchange entities with proper mapping
-                    if entity.lower() in ['nepal', 'bhutan', 'bangladesh', 'myanmar']:
+                    if entity.lower() in ["nepal", "bhutan", "bangladesh", "myanmar"]:
                         # Map country names to correct database values
                         country_mapping = {
-                            'nepal': 'Nepal',
-                            'bhutan': 'Bhutan', 
-                            'bangladesh': 'Bangladesh',
-                            'myanmar': 'Myanmar'
+                            "nepal": "Nepal",
+                            "bhutan": "Bhutan",
+                            "bangladesh": "Bangladesh",
+                            "myanmar": "Myanmar",
                         }
-                        mapped_country = country_mapping.get(entity.lower(), entity.title())
+                        mapped_country = country_mapping.get(
+                            entity.lower(), entity.title()
+                        )
                         conditions.append(f"dc.CountryName = '{mapped_country}'")
-                        logger.info(f"Added country condition with mapping: dc.CountryName = '{mapped_country}' (mapped from '{entity}')")
+                        logger.info(
+                            f"Added country condition with mapping: dc.CountryName = '{mapped_country}' (mapped from '{entity}')"
+                        )
         else:
             if is_all_states_query or is_all_regions_query:
                 logger.info(f"Skipping entity conditions for 'all' query")
@@ -1469,209 +1947,235 @@ class SQLAssembler:
                 logger.warning(f"No entities extracted from query analysis")
             # Manual fallback: check for region names in the original query
             # This is a temporary fix until entity extraction is fully working
-            if hasattr(analysis, '_original_query'):
+            if hasattr(analysis, "_original_query"):
                 query_lower = analysis._original_query.lower()
-                if 'northern region' in query_lower:
+                if "northern region" in query_lower:
                     conditions.append("d.RegionName = 'Northern Region'")
-                    logger.info("Added manual region condition: d.RegionName = 'Northern Region'")
-                elif 'southern region' in query_lower:
+                    logger.info(
+                        "Added manual region condition: d.RegionName = 'Northern Region'"
+                    )
+                elif "southern region" in query_lower:
                     conditions.append("d.RegionName = 'Southern Region'")
-                    logger.info("Added manual region condition: d.RegionName = 'Southern Region'")
-                elif 'western region' in query_lower:
+                    logger.info(
+                        "Added manual region condition: d.RegionName = 'Southern Region'"
+                    )
+                elif "western region" in query_lower:
                     conditions.append("d.RegionName = 'Western Region'")
-                    logger.info("Added manual region condition: d.RegionName = 'Western Region'")
-                elif 'eastern region' in query_lower:
+                    logger.info(
+                        "Added manual region condition: d.RegionName = 'Western Region'"
+                    )
+                elif "eastern region" in query_lower:
                     conditions.append("d.RegionName = 'Eastern Region'")
-                    logger.info("Added manual region condition: d.RegionName = 'Eastern Region'")
-                elif 'north eastern region' in query_lower:
+                    logger.info(
+                        "Added manual region condition: d.RegionName = 'Eastern Region'"
+                    )
+                elif "north eastern region" in query_lower:
                     conditions.append("d.RegionName = 'North Eastern Region'")
-                    logger.info("Added manual region condition: d.RegionName = 'North Eastern Region'")
+                    logger.info(
+                        "Added manual region condition: d.RegionName = 'North Eastern Region'"
+                    )
                 # === SPRINT 3: REMOVED HARDCODED MANUAL STATE CONDITIONS ===
                 # Manual fallback for state names - now using centralized entity loader
                 # The entity extraction should handle state names properly
-        
+
         # Add date conditions from time period analysis
         if analysis.time_period:
             logger.info(f"Time period analysis: {analysis.time_period}")
             time_period = analysis.time_period
-            
-            if time_period.get('type') == 'specific_date':
-                year = time_period.get('year')
-                month = time_period.get('month')
-                day = time_period.get('day')
-                
+
+            if time_period.get("type") == "specific_date":
+                year = time_period.get("year")
+                month = time_period.get("month")
+                day = time_period.get("day")
+
                 if year:
                     conditions.append(f"dt.Year = {year}")
                     logger.info(f"Added year condition: dt.Year = {year}")
-                
+
                 if month:
                     conditions.append(f"dt.Month = {month}")
                     logger.info(f"Added month condition: dt.Month = {month}")
-                
+
                 if day:
                     conditions.append(f"dt.DayOfMonth = {day}")
                     logger.info(f"Added day condition: dt.DayOfMonth = {day}")
-            
-            elif time_period.get('type') == 'date_range':
-                start_year = time_period.get('start_year')
-                start_month = time_period.get('start_month')
-                end_year = time_period.get('end_year')
-                end_month = time_period.get('end_month')
-                
+
+            elif time_period.get("type") == "date_range":
+                start_year = time_period.get("start_year")
+                start_month = time_period.get("start_month")
+                end_year = time_period.get("end_year")
+                end_month = time_period.get("end_month")
+
                 if start_year and end_year:
                     if start_year == end_year:
                         conditions.append(f"dt.Year = {start_year}")
                         logger.info(f"Added year condition: dt.Year = {start_year}")
-                        
+
                         if start_month and end_month:
-                            conditions.append(f"dt.Month BETWEEN {start_month} AND {end_month}")
-                            logger.info(f"Added month range condition: dt.Month BETWEEN {start_month} AND {end_month}")
+                            conditions.append(
+                                f"dt.Month BETWEEN {start_month} AND {end_month}"
+                            )
+                            logger.info(
+                                f"Added month range condition: dt.Month BETWEEN {start_month} AND {end_month}"
+                            )
                     else:
-                        conditions.append(f"(dt.Year > {start_year} OR (dt.Year = {start_year} AND dt.Month >= {start_month or 1}))")
-                        conditions.append(f"(dt.Year < {end_year} OR (dt.Year = {end_year} AND dt.Month <= {end_month or 12}))")
-                        logger.info(f"Added date range conditions for {start_year}-{start_month} to {end_year}-{end_month}")
-        
+                        conditions.append(
+                            f"(dt.Year > {start_year} OR (dt.Year = {start_year} AND dt.Month >= {start_month or 1}))"
+                        )
+                        conditions.append(
+                            f"(dt.Year < {end_year} OR (dt.Year = {end_year} AND dt.Month <= {end_month or 12}))"
+                        )
+                        logger.info(
+                            f"Added date range conditions for {start_year}-{start_month} to {end_year}-{end_month}"
+                        )
+
         # Add conditions from user mappings
         for mapping in user_mappings:
-            table_name = mapping['dimension_table']
+            table_name = mapping["dimension_table"]
             column_name = self._get_name_column(table_name)
-            value = mapping['dimension_value']
-            
+            value = mapping["dimension_value"]
+
             condition = f"{table_name}.{column_name} = '{value}'"
             conditions.append(condition)
             logger.info(f"Added user mapping condition: {condition}")
-        
+
         if conditions:
             where_clause = f"WHERE {' AND '.join(conditions)}"
             logger.info(f"Final WHERE clause: {where_clause}")
             return where_clause
-        
+
         logger.info("No conditions found, returning empty WHERE clause")
         return ""
-    
+
     def _get_name_column(self, table_name: str) -> str:
         """
         Get the name column for a dimension table.
         """
         name_columns = {
-            'DimRegions': 'RegionName',
-            'DimStates': 'StateName',
-            'DimCountries': 'CountryName',
-            'DimGenerationSources': 'SourceName',
-            'DimTransmissionLinks': 'LinkName',
-            'DimTimeBlocks': 'TimeBlockName'
+            "DimRegions": "RegionName",
+            "DimStates": "StateName",
+            "DimCountries": "CountryName",
+            "DimGenerationSources": "SourceName",
+            "DimTransmissionLinks": "LinkName",
+            "DimTimeBlocks": "TimeBlockName",
         }
-        
-        return name_columns.get(table_name, 'Name')
-    
+
+        return name_columns.get(table_name, "Name")
+
     def _format_schema_info(self, schema_info) -> str:
         """
         Format schema information for the prompt.
         """
         if not schema_info:
             return "Schema information not available"
-        
+
         # Handle both SchemaInfo objects and raw dictionaries
-        if hasattr(schema_info, 'tables'):
+        if hasattr(schema_info, "tables"):
             # It's a SchemaInfo object
             tables_dict = schema_info.tables
         else:
             # It's a raw dictionary
             tables_dict = schema_info
-        
+
         if not tables_dict:
             return "Schema information not available"
-        
+
         formatted = []
         for table, columns in tables_dict.items():
             formatted.append(f"{table}: {', '.join(columns)}")
-        
+
         return "\n".join(formatted)
-    
+
     def _format_dimension_values(self, dimension_values: Dict[str, List[str]]) -> str:
         """
         Format dimension values for the prompt.
         """
         if not dimension_values:
             return "Dimension values not available"
-        
+
         formatted = []
         for table, values in dimension_values.items():
-            formatted.append(f"{table}: {', '.join(values[:10])}")  # Limit to first 10 values
-        
+            formatted.append(
+                f"{table}: {', '.join(values[:10])}"
+            )  # Limit to first 10 values
+
         return "\n".join(formatted)
-    
+
     def _format_user_mappings(self, user_mappings: List[Dict[str, Any]]) -> str:
         """
         Format user mappings for the prompt.
         """
         if not user_mappings:
             return "No user mappings found"
-        
+
         formatted = []
         for mapping in user_mappings:
-            formatted.append(f"'{mapping['user_term']}' -> {mapping['dimension_table']}.{mapping['dimension_value']}")
-        
+            formatted.append(
+                f"'{mapping['user_term']}' -> {mapping['dimension_table']}.{mapping['dimension_value']}"
+            )
+
         return "\n".join(formatted)
-    
+
     def _post_process_sql(self, sql: str) -> str:
         """
         Post-process generated SQL.
         """
         # Remove extra whitespace
-        sql = ' '.join(sql.split())
-        
-        # Ensure proper termination
-        if not sql.rstrip().endswith(';'):
-            sql += ';'
-        
-        return sql 
+        sql = " ".join(sql.split())
 
-    def _generate_column_alias(self, query: str, column_name: str, aggregation_function: str) -> str:
+        # Ensure proper termination
+        if not sql.rstrip().endswith(";"):
+            sql += ";"
+
+        return sql
+
+    def _generate_column_alias(
+        self, query: str, column_name: str, aggregation_function: str
+    ) -> str:
         """
         Generate an informative column alias based on the query and column being used.
-        
+
         Args:
             query: The original user query
             column_name: The database column name
             aggregation_function: The aggregation function being used (SUM, MAX, MIN, AVG)
-            
+
         Returns:
             Informative column alias
         """
         query_lower = query.lower()
-        
+
         # Map column names to user-friendly terms
         column_mapping = {
-            'EnergyMet': 'EnergyMet',
-            'EnergyShortage': 'EnergyShortage',
-            'DrawalSchedule': 'DrawalSchedule',
-            'ActualDrawal': 'ActualDrawal',
-            'MaximumDemand': 'MaximumDemand',
-            'EveningPeakDemand': 'EveningPeakDemand',
-            'MaxDemandSCADA': 'MaximumDemand',
-            'EveningPeakDemandMet': 'EveningPeakDemand',
-            'ScheduleDrawal': 'ScheduleDrawal',
-            'GenerationAmount': 'GenerationAmount'
+            "EnergyMet": "EnergyMet",
+            "EnergyShortage": "EnergyShortage",
+            "DrawalSchedule": "DrawalSchedule",
+            "ActualDrawal": "ActualDrawal",
+            "MaximumDemand": "MaximumDemand",
+            "EveningPeakDemand": "EveningPeakDemand",
+            "MaxDemandSCADA": "MaximumDemand",
+            "EveningPeakDemandMet": "EveningPeakDemand",
+            "ScheduleDrawal": "ScheduleDrawal",
+            "GenerationAmount": "GenerationAmount",
         }
-        
+
         # Get the user-friendly column name
         friendly_column = column_mapping.get(column_name, column_name)
-        
+
         # Map aggregation functions to user-friendly terms
         agg_mapping = {
-            'SUM': 'Total',
-            'MAX': 'Maximum',
-            'MIN': 'Minimum',
-            'AVG': 'Average'
+            "SUM": "Total",
+            "MAX": "Maximum",
+            "MIN": "Minimum",
+            "AVG": "Average",
         }
-        
+
         # Get the user-friendly aggregation term
         agg_term = agg_mapping.get(aggregation_function, aggregation_function)
-        
+
         # Combine aggregation term with column name
         alias = f"{agg_term}{friendly_column}"
-        
+
         # Special cases for common query patterns
         if "total" in query_lower and aggregation_function == "SUM":
             alias = f"Total{friendly_column}"
@@ -1681,78 +2185,96 @@ class SQLAssembler:
             alias = f"Minimum{friendly_column}"
         elif "average" in query_lower or "avg" in query_lower:
             alias = f"Average{friendly_column}"
-        
-        return alias 
 
-    def _determine_aggregation_function(self, query: str, analysis: QueryAnalysis) -> str:
+        return alias
+
+    def _determine_aggregation_function(
+        self, query: str, analysis: QueryAnalysis
+    ) -> str:
         """
         Dynamically determine the aggregation function based on query keywords.
         """
         query_lower = query.lower()
-        detected_keywords = analysis.detected_keywords if hasattr(analysis, 'detected_keywords') else []
-        
+        detected_keywords = (
+            analysis.detected_keywords if hasattr(analysis, "detected_keywords") else []
+        )
+
         # Check for aggregation keywords in the query
-        if any(word in query_lower for word in ['maximum', 'max', 'highest', 'peak']):
+        if any(word in query_lower for word in ["maximum", "max", "highest", "peak"]):
             return "MAX"
-        elif any(word in query_lower for word in ['minimum', 'min', 'lowest']):
+        elif any(word in query_lower for word in ["minimum", "min", "lowest"]):
             return "MIN"
-        elif any(word in query_lower for word in ['average', 'avg', 'mean']):
+        elif any(word in query_lower for word in ["average", "avg", "mean"]):
             return "AVG"
-        elif any(word in query_lower for word in ['total', 'sum', 'aggregate']):
+        elif any(word in query_lower for word in ["total", "sum", "aggregate"]):
             return "SUM"
         else:
             # Check detected keywords
-            if any(word in detected_keywords for word in ['maximum', 'max', 'highest', 'peak']):
+            if any(
+                word in detected_keywords
+                for word in ["maximum", "max", "highest", "peak"]
+            ):
                 return "MAX"
-            elif any(word in detected_keywords for word in ['minimum', 'min', 'lowest']):
+            elif any(
+                word in detected_keywords for word in ["minimum", "min", "lowest"]
+            ):
                 return "MIN"
-            elif any(word in detected_keywords for word in ['average', 'avg', 'mean']):
+            elif any(word in detected_keywords for word in ["average", "avg", "mean"]):
                 return "AVG"
             else:
                 return "SUM"  # Default to SUM
-    
+
     def _determine_time_period(self, query: str) -> str:
         """
         Dynamically determine the time period for aggregation.
         """
         query_lower = query.lower()
-        
-        if any(word in query_lower for word in ['quarterly', 'quarter', 'q1', 'q2', 'q3', 'q4']):
+
+        if any(
+            word in query_lower
+            for word in ["quarterly", "quarter", "q1", "q2", "q3", "q4"]
+        ):
             return "quarterly"
-        elif any(word in query_lower for word in ['yearly', 'annual', 'year over year']):
+        elif any(
+            word in query_lower for word in ["yearly", "annual", "year over year"]
+        ):
             return "yearly"
-        elif any(word in query_lower for word in ['weekly', 'week', 'per week']):
+        elif any(word in query_lower for word in ["weekly", "week", "per week"]):
             return "weekly"
-        elif any(word in query_lower for word in ['monthly', 'month over month', 'per month']):
+        elif any(
+            word in query_lower for word in ["monthly", "month over month", "per month"]
+        ):
             return "monthly"
-        elif any(word in query_lower for word in ['daily', 'day', 'per day']):
+        elif any(word in query_lower for word in ["daily", "day", "per day"]):
             return "daily"
         else:
             return "monthly"  # Default to monthly
 
-    def _generate_growth_column_aliases(self, energy_column: str, time_period: str) -> tuple:
+    def _generate_growth_column_aliases(
+        self, energy_column: str, time_period: str
+    ) -> tuple:
         """
         Generate context-aware column aliases for growth queries.
         """
         # Map energy columns to readable names
         column_mapping = {
-            'EnergyMet': 'EnergyMet',
-            'EnergyShortage': 'EnergyShortage',
-            'EnergyConsumption': 'EnergyConsumption',
-            'GenerationAmount': 'Generation',
-            'ShareRESInTotalGeneration': 'RESGeneration',
-            'CoalGeneration': 'CoalGeneration',
-            'GasGeneration': 'GasGeneration',
-            'NuclearGeneration': 'NuclearGeneration',
-            'SolarGeneration': 'SolarGeneration',
-            'WindGeneration': 'WindGeneration',
-            'HydroGeneration': 'HydroGeneration',
-            'GenerationSourceID': 'Generation'  # Handle the ID column case
+            "EnergyMet": "EnergyMet",
+            "EnergyShortage": "EnergyShortage",
+            "EnergyConsumption": "EnergyConsumption",
+            "GenerationAmount": "Generation",
+            "ShareRESInTotalGeneration": "RESGeneration",
+            "CoalGeneration": "CoalGeneration",
+            "GasGeneration": "GasGeneration",
+            "NuclearGeneration": "NuclearGeneration",
+            "SolarGeneration": "SolarGeneration",
+            "WindGeneration": "WindGeneration",
+            "HydroGeneration": "HydroGeneration",
+            "GenerationSourceID": "Generation",  # Handle the ID column case
         }
-        
+
         # Get the readable name for the energy column
         metric_name = column_mapping.get(energy_column, energy_column)
-        
+
         # Generate time-specific aliases
         if time_period == "monthly":
             current_alias = f"CurrentMonth{metric_name}"
@@ -1772,7 +2294,7 @@ class SQLAssembler:
         else:
             current_alias = f"Current{metric_name}"
             previous_alias = f"Previous{metric_name}"
-        
+
         return current_alias, previous_alias
 
     def _detect_generation_source(self, query: str) -> Optional[str]:
@@ -1781,32 +2303,32 @@ class SQLAssembler:
         Returns the source name to filter for, or None if no specific source detected.
         """
         query_lower = query.lower()
-        
+
         # Define source mappings
         source_mappings = {
-            'coal': ['coal', 'thermal', 'fossil'],
-            'solar': ['solar', 'photovoltaic', 'pv'],
-            'wind': ['wind', 'wind power'],
-            'nuclear': ['nuclear', 'atomic'],
-            'hydro': ['hydro', 'hydropower', 'water'],
-            'gas': ['gas', 'natural gas', 'lng'],
-            'biomass': ['biomass', 'bio'],
-            'geothermal': ['geothermal', 'geo'],
-            'renewable': ['renewable', 'clean energy', 'green energy'],
-            'thermal': ['thermal', 'coal', 'gas', 'fossil']
+            "coal": ["coal", "thermal", "fossil"],
+            "solar": ["solar", "photovoltaic", "pv"],
+            "wind": ["wind", "wind power"],
+            "nuclear": ["nuclear", "atomic"],
+            "hydro": ["hydro", "hydropower", "water"],
+            "gas": ["gas", "natural gas", "lng"],
+            "biomass": ["biomass", "bio"],
+            "geothermal": ["geothermal", "geo"],
+            "renewable": ["renewable", "clean energy", "green energy"],
+            "thermal": ["thermal", "coal", "gas", "fossil"],
         }
-        
+
         # Check for specific source mentions
         for source_name, keywords in source_mappings.items():
             if any(keyword in query_lower for keyword in keywords):
                 return source_name
-        
+
         # Special handling for thermal vs coal
-        if 'thermal' in query_lower and 'coal' not in query_lower:
-            return 'thermal'
-        elif 'coal' in query_lower:
-            return 'coal'
-        
+        if "thermal" in query_lower and "coal" not in query_lower:
+            return "thermal"
+        elif "coal" in query_lower:
+            return "coal"
+
         return None
 
     def _add_source_filtering(self, where_clause: str, generation_source: str) -> str:
@@ -1815,26 +2337,26 @@ class SQLAssembler:
         """
         if not generation_source:
             return where_clause
-        
+
         # Define source name mappings for database filtering
         source_filters = {
-            'coal': "gs.SourceName LIKE '%coal%' OR gs.SourceName LIKE '%thermal%'",
-            'solar': "gs.SourceName LIKE '%solar%' OR gs.SourceName LIKE '%photovoltaic%'",
-            'wind': "gs.SourceName LIKE '%wind%'",
-            'nuclear': "gs.SourceName LIKE '%nuclear%' OR gs.SourceName LIKE '%atomic%'",
-            'hydro': "gs.SourceName LIKE '%hydro%' OR gs.SourceName LIKE '%water%'",
-            'gas': "gs.SourceName LIKE '%gas%' OR gs.SourceName LIKE '%lng%'",
-            'biomass': "gs.SourceName LIKE '%biomass%' OR gs.SourceName LIKE '%bio%'",
-            'geothermal': "gs.SourceName LIKE '%geothermal%'",
-            'renewable': "gs.SourceName NOT LIKE '%coal%' AND gs.SourceName NOT LIKE '%thermal%' AND gs.SourceName NOT LIKE '%gas%'",
-            'thermal': "gs.SourceName LIKE '%coal%' OR gs.SourceName LIKE '%thermal%' OR gs.SourceName LIKE '%gas%'"
+            "coal": "gs.SourceName LIKE '%coal%' OR gs.SourceName LIKE '%thermal%'",
+            "solar": "gs.SourceName LIKE '%solar%' OR gs.SourceName LIKE '%photovoltaic%'",
+            "wind": "gs.SourceName LIKE '%wind%'",
+            "nuclear": "gs.SourceName LIKE '%nuclear%' OR gs.SourceName LIKE '%atomic%'",
+            "hydro": "gs.SourceName LIKE '%hydro%' OR gs.SourceName LIKE '%water%'",
+            "gas": "gs.SourceName LIKE '%gas%' OR gs.SourceName LIKE '%lng%'",
+            "biomass": "gs.SourceName LIKE '%biomass%' OR gs.SourceName LIKE '%bio%'",
+            "geothermal": "gs.SourceName LIKE '%geothermal%'",
+            "renewable": "gs.SourceName NOT LIKE '%coal%' AND gs.SourceName NOT LIKE '%thermal%' AND gs.SourceName NOT LIKE '%gas%'",
+            "thermal": "gs.SourceName LIKE '%coal%' OR gs.SourceName LIKE '%thermal%' OR gs.SourceName LIKE '%gas%'",
         }
-        
+
         source_filter = source_filters.get(generation_source.lower())
         if source_filter:
             if where_clause:
                 return f"{where_clause} AND ({source_filter})"
             else:
                 return f"WHERE {source_filter}"
-        
+
         return where_clause
