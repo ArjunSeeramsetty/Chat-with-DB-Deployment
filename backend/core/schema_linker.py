@@ -847,21 +847,24 @@ class SchemaLinker:
             score = 0.0
 
             # Check keyword matches
+            keywords: List[str] = pattern["keywords"]
             keyword_matches = sum(
-                1 for keyword in pattern["keywords"] if keyword in query_lower
+                1 for keyword in keywords if keyword in query_lower
             )
             if keyword_matches > 0:
                 score += keyword_matches * 0.3
 
             # Check metric matches
+            metrics: List[str] = pattern["metrics"]
             metric_matches = sum(
-                1 for metric in pattern["metrics"] if metric in query_lower
+                1 for metric in metrics if metric in query_lower
             )
             if metric_matches > 0:
                 score += metric_matches * 0.4
 
             # Apply priority multiplier
-            score *= float(pattern["priority"])
+            priority: float = float(pattern["priority"])
+            score *= priority
 
             # Special handling for generation queries
             if any(
@@ -991,7 +994,7 @@ class SchemaLinker:
             config["where_clause"] = ""  # No filter - include all
         else:
             # Let the assembler handle specific entity filtering
-            config["where_clause"] = None
+            config["where_clause"] = ""
 
         logger.info(
             f"Auto-configured table '{table_name}': join='{config['join_clause']}', name_col='{config['name_column']}'"
@@ -1002,7 +1005,7 @@ class SchemaLinker:
         self,
         user_query: str,
         table_name: str,
-        query_type: str = None,
+        query_type: Optional[str] = None,
         llm_provider=None,
     ) -> str:
         """
@@ -1216,10 +1219,10 @@ class SchemaLinker:
                     f"LLM Hook #2: Attempting column linking for query: {user_query}"
                 )
                 # Note: This is a simplified version - in production, you'd want proper async handling
-                return None  # Skip for now to avoid async issues
+                return ""  # Skip for now to avoid async issues
             except Exception as e:
                 logger.warning(f"LLM Hook #2 (Column Linking) failed: {e}")
-                return None
+                return ""
 
         # No fallback - return empty string to indicate no match found
         logger.warning(
