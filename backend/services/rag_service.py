@@ -17,18 +17,10 @@ from backend.core.intent import IntentAnalyzer
 from backend.core.llm_provider import create_llm_provider
 from backend.core.schema_linker import SchemaContext, SchemaLinker
 from backend.core.sql_validator import SQLValidator as LegacySQLValidator
-from backend.core.types import (
-    ContextInfo,
-    ExecutionResult,
-    IntentType,
-    ProcessingMode,
-    QueryAnalysis,
-    QueryRequest,
-    QueryResponse,
-    QueryType,
-    SQLGenerationResult,
-    VisualizationRecommendation,
-)
+from backend.core.types import (ContextInfo, ExecutionResult, IntentType,
+                                ProcessingMode, QueryAnalysis, QueryRequest,
+                                QueryResponse, QueryType, SQLGenerationResult,
+                                VisualizationRecommendation)
 from backend.core.validator import EnhancedSQLValidator, SQLSandbox
 
 logger = logging.getLogger(__name__)

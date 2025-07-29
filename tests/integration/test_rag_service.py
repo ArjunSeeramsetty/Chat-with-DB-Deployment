@@ -144,12 +144,15 @@ class TestComponentIntegration:
         
         # Test query analysis
         query = "What is the energy consumption in Maharashtra?"
-        analysis = analyzer.analyze_intent(query)
         
-        assert analysis is not None
-        assert hasattr(analysis, 'query_type')
-        assert hasattr(analysis, 'entities')
-        assert hasattr(analysis, 'confidence')
+        async def test_analysis():
+            analysis = await analyzer.analyze_intent(query)
+            assert analysis is not None
+            assert hasattr(analysis, 'query_type')
+            assert hasattr(analysis, 'entities')
+            assert hasattr(analysis, 'confidence')
+        
+        asyncio.run(test_analysis())
     
     @pytest.mark.integration
     @pytest.mark.sprint2
