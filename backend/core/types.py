@@ -67,6 +67,7 @@ class QueryAnalysis(BaseModel):
     join_key: str
     name_column: str
     detected_keywords: List[str] = Field(default_factory=list)
+    original_query: Optional[str] = None
 
 
 class SQLGenerationResult(BaseModel):

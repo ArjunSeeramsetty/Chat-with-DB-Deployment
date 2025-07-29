@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..core.entity_loader import get_entity_loader
 from ..core.schema_linker import SchemaLinker
-from ..core.types import ContextInfo, QueryAnalysis, SQLGenerationResult
+from ..core.types import ContextInfo, QueryAnalysis, SQLGenerationResult, UserMapping
 
 logger = logging.getLogger(__name__)
 
@@ -612,10 +612,10 @@ class SQLAssembler:
         {self._format_schema_info(context.schema_info)}
         
         Available Dimension Values:
-        {self._format_dimension_values(context.dimension_values)}
+        {self._format_dimension_values({k: [v.name for v in values] for k, values in context.dimension_values.items()})}
         
         User Mappings:
-        {self._format_user_mappings(context.user_mappings)}
+        {self._format_user_mappings([{"user_term": m.mapping_type, "dimension_table": m.entity.table, "dimension_value": m.entity.name} for m in context.user_mappings])}
         
         Generate a valid SQLite SQL query that:
         1. Uses the appropriate fact and dimension tables
@@ -1809,7 +1809,7 @@ class SQLAssembler:
         return ""
 
     def _build_where_clause_from_entities(
-        self, analysis: QueryAnalysis, user_mappings: List[Dict[str, Any]]
+        self, analysis: QueryAnalysis, user_mappings: List[UserMapping]
     ) -> str:
         """
         Build WHERE clause based on extracted entities and user mappings.
@@ -1817,7 +1817,7 @@ class SQLAssembler:
         conditions = []
 
         # Check if this is an "all states" or "all regions" query
-        original_query = getattr(analysis, "_original_query", "")
+        original_query = analysis.original_query or ""
         query_lower = original_query.lower() if original_query else ""
         is_all_states_query = any(
             phrase in query_lower
@@ -1947,8 +1947,8 @@ class SQLAssembler:
                 logger.warning(f"No entities extracted from query analysis")
             # Manual fallback: check for region names in the original query
             # This is a temporary fix until entity extraction is fully working
-            if hasattr(analysis, "_original_query"):
-                query_lower = analysis._original_query.lower()
+            if analysis.original_query:
+                query_lower = analysis.original_query.lower()
                 if "northern region" in query_lower:
                     conditions.append("d.RegionName = 'Northern Region'")
                     logger.info(
@@ -2031,9 +2031,9 @@ class SQLAssembler:
 
         # Add conditions from user mappings
         for mapping in user_mappings:
-            table_name = mapping["dimension_table"]
+            table_name = mapping.entity.table
             column_name = self._get_name_column(table_name)
-            value = mapping["dimension_value"]
+            value = mapping.entity.name
 
             condition = f"{table_name}.{column_name} = '{value}'"
             conditions.append(condition)

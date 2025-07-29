@@ -170,7 +170,7 @@ class EnhancedRAGService:
                 f"Re-extracted entities from original query: {original_entities}"
             )
             # Add original query for manual entity extraction
-            query_analysis._original_query = request.question
+            query_analysis.original_query = request.question
             logger.info(
                 f"Intent analysis completed - Type: {query_analysis.query_type.value}, Intent: {query_analysis.intent.value}, Confidence: {query_analysis.confidence}"
             )
@@ -493,7 +493,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 query_type=query_analysis.query_type,
                 intent_analysis=query_analysis.dict(),
                 follow_up_suggestions=suggestions,
-                visualization=visualization.dict() if visualization else None,
+                visualization=visualization if visualization else None,
                 plot=(
                     {
                         "chartType": visualization.chart_type,
@@ -504,13 +504,6 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 ),
                 table=self._format_table_data(execution_result),
                 api_calls=self._count_api_calls(request.processing_mode, visualization),
-                summary=summary,
-                llm_model=(
-                    getattr(self.llm_provider, "model", None)
-                    if self.llm_provider
-                    else None
-                ),
-                gpu_status=self._get_gpu_status(),
                 confidence=sql_result.confidence,  # Include confidence score
                 clarification_attempt_count=request.clarification_attempt_count,
             )

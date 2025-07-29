@@ -430,7 +430,7 @@ async def test_monthly_functionality(request: QueryRequest):
 
         # Analyze query
         analysis = await intent_analyzer.analyze_intent(query)
-        analysis._original_query = query
+        analysis.original_query = query
 
         # Create context
         context = ContextInfo(
