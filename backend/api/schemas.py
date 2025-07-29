@@ -9,8 +9,13 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 # Re-export core types for API use
-from ..core.types import (IntentType, ProcessingMode, QueryType,
-                          ValidationResult, VisualizationRecommendation)
+from ..core.types import (
+    IntentType,
+    ProcessingMode,
+    QueryType,
+    ValidationResult,
+    VisualizationRecommendation,
+)
 
 
 class QueryRequest(BaseModel):
