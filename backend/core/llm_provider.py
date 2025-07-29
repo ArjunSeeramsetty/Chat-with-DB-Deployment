@@ -10,11 +10,11 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 try:
     from openai.types.chat import (
-        ChatCompletionSystemMessageParam,
-        ChatCompletionUserMessageParam,
         ChatCompletionAssistantMessageParam,
-        ChatCompletionToolMessageParam,
         ChatCompletionFunctionMessageParam,
+        ChatCompletionSystemMessageParam,
+        ChatCompletionToolMessageParam,
+        ChatCompletionUserMessageParam,
     )
 except ImportError:
     # Fallback types for when openai package is not available
