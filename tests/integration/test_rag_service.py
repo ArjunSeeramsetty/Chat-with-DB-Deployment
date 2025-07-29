@@ -144,7 +144,7 @@ class TestComponentIntegration:
         
         # Test query analysis
         query = "What is the energy consumption in Maharashtra?"
-        analysis = analyzer.analyze_query(query)
+        analysis = analyzer.analyze_intent(query)
         
         assert analysis is not None
         assert hasattr(analysis, 'query_type')
@@ -160,7 +160,7 @@ class TestComponentIntegration:
         assembler = SQLAssembler()
         
         # Test SQL generation
-        from backend.core.types import QueryAnalysis, QueryType, IntentType
+        from backend.core.types import QueryAnalysis, QueryType, IntentType, ContextInfo
         analysis = QueryAnalysis(
             query_type=QueryType.STATE,
             intent=IntentType.DATA_RETRIEVAL,
@@ -172,7 +172,15 @@ class TestComponentIntegration:
             name_column="StateName"
         )
         
-        sql_result = assembler.generate_sql("What is the energy consumption?", analysis)
+        # Create a minimal context
+        context = ContextInfo(
+            query_analysis=analysis,
+            user_mappings=[],
+            dimension_values={},
+            schema_info=None
+        )
+        
+        sql_result = assembler.generate_sql("What is the energy consumption?", analysis, context)
         assert sql_result is not None
     
     @pytest.mark.integration

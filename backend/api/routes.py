@@ -254,11 +254,11 @@ async def validate_sql(
     rag_service: EnhancedRAGService = Depends(get_rag_service_dep),
 ):
     """Validate SQL query"""
-    try:
-        sql = sql_request.get("sql", "")
-        if not sql:
-            raise HTTPException(status_code=400, detail="SQL query is required")
+    sql = sql_request.get("sql", "")
+    if not sql:
+        raise HTTPException(status_code=400, detail="SQL query is required")
 
+    try:
         # Use enhanced validator
         validator = rag_service.enhanced_validator
         result = validator.validate_sql(sql)
