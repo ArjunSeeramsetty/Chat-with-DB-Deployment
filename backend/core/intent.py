@@ -311,9 +311,9 @@ class IntentAnalyzer:
                     except Exception as e:
                         # If dateutil fails, try manual parsing
                         try:
-                            parsed_date: Optional[date] = self._manual_date_parse(expr)
-                            if parsed_date:
-                                parsed_dates.append(parsed_date)
+                            manual_parsed_date: Optional[date] = self._manual_date_parse(expr)
+                            if manual_parsed_date:
+                                parsed_dates.append(manual_parsed_date)
                         except:
                             continue
 
