@@ -174,7 +174,7 @@ class CandidateRanker:
 
             for column in statement.find_all(exp.Column):
                 if column.table:
-                    columns.add(f"{column.table}.{column.name}".lower())
+                    columns.add(f"{str(column.table)}.{column.name}".lower())
                 else:
                     columns.add(column.name.lower())
 

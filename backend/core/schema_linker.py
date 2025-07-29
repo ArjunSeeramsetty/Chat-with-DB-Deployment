@@ -574,8 +574,8 @@ class SchemaLinker:
             return 0.0
 
         # Weight by confidence and context type
-        total_weight = 0
-        weighted_sum = 0
+        total_weight: float = 0.0
+        weighted_sum: float = 0.0
 
         for link in links:
             weight = 1.0
@@ -861,7 +861,7 @@ class SchemaLinker:
                 score += metric_matches * 0.4
 
             # Apply priority multiplier
-            score *= pattern["priority"]
+            score *= float(pattern["priority"])
 
             # Special handling for generation queries
             if any(
