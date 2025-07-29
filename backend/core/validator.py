@@ -161,18 +161,14 @@ class EnhancedSQLValidator:
             if warnings:
                 try:
                     # Use sqlfluff fix to automatically fix style issues
-                    fix_result: List[str] = fix.fix_string(sql, dialect="sqlite")
-                    if fix_result and len(fix_result) > 0:
-                        fixed_sql = fix_result[0]
-                        logger.info("Applied sqlfluff auto-fixes")
-                    else:
-                        # Fallback to manual fixes if sqlfluff fix fails
-                        fixed_sql = self._manual_style_fix(sql, warnings)
+                    # Note: sqlfluff.fix doesn't have fix_string method, use manual fixes
+                    fixed_sql = self._manual_style_fix(sql, warnings)
+                    logger.info("Applied manual style fixes")
                 except Exception as e:
                     logger.warning(
-                        f"sqlfluff fix failed: {e}, falling back to manual fixes"
+                        f"Style fix failed: {e}, using original SQL"
                     )
-                    fixed_sql = self._manual_style_fix(sql, warnings)
+                    fixed_sql = sql
 
             return True, fixed_sql, warnings
 
@@ -307,15 +303,13 @@ class EnhancedSQLValidator:
             if not syntax_errors:
                 return False, None
 
-            # Use sqlfluff fix for syntax repair
-            fix_result: List[str] = fix.fix_string(sql, dialect="sqlite")
-            if fix_result and len(fix_result) > 0:
-                repaired_sql = fix_result[0]
+            # Use manual style fix for syntax repair
+            repaired_sql = self._manual_style_fix(sql, errors)
 
-                # Validate the repaired SQL
-                validation = self._validate_syntax(repaired_sql)
-                if validation[0]:
-                    return True, repaired_sql
+            # Validate the repaired SQL
+            validation = self._validate_syntax(repaired_sql)
+            if validation[0]:
+                return True, repaired_sql
 
             return False, None
 
