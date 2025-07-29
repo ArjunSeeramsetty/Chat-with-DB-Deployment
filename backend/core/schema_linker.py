@@ -848,17 +848,13 @@ class SchemaLinker:
 
             # Check keyword matches
             keywords: List[str] = pattern["keywords"]
-            keyword_matches = sum(
-                1 for keyword in keywords if keyword in query_lower
-            )
+            keyword_matches = sum(1 for keyword in keywords if keyword in query_lower)
             if keyword_matches > 0:
                 score += keyword_matches * 0.3
 
             # Check metric matches
             metrics: List[str] = pattern["metrics"]
-            metric_matches = sum(
-                1 for metric in metrics if metric in query_lower
-            )
+            metric_matches = sum(1 for metric in metrics if metric in query_lower)
             if metric_matches > 0:
                 score += metric_matches * 0.4
 
