@@ -66,8 +66,8 @@ class EnhancedRAGService:
         self.sql_sandbox = SQLSandbox(db_path)
 
         # Initialize cache attributes first
-        self._schema_cache = None
-        self._schema_cache_time = 0
+        self._schema_cache: Optional[Dict[str, List[str]]] = None
+        self._schema_cache_time: float = 0
         self._cache_ttl = self.settings.memory_cache_ttl  # Use configurable TTL
 
         # Initialize enhanced components
@@ -1574,7 +1574,7 @@ SQL Query:
         self,
         query: str,
         analysis: QueryAnalysis,
-        clarification_answers: Dict[str, str] = None,
+        clarification_answers: Optional[Dict[str, str]] = None,
     ) -> str:
         """
         Build a contextual clarification prompt that includes previous clarification answers.

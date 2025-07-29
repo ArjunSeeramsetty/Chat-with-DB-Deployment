@@ -44,7 +44,7 @@ class CandidateRanker:
     def __init__(
         self,
         schema_info: Dict[str, List[str]],
-        example_queries: List[Dict[str, Any]] = None,
+        example_queries: Optional[List[Dict[str, Any]]] = None,
     ):
         self.schema_info = schema_info
         self.example_queries = example_queries or []

@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+from pydantic import Field
 
 import sqlglot
 import sqlparse
@@ -26,7 +27,7 @@ class ValidationResult:
     fixed_sql: Optional[str] = None
     confidence: float = 0.0
     parse_tree: Optional[Any] = None
-    schema_violations: List[str] = None
+    schema_violations: List[str] = Field(default_factory=list)
 
 
 class SQLValidator:
