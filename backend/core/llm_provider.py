@@ -144,7 +144,7 @@ class OpenAIProvider(LLMProvider):
                             role="user", content=msg["content"]
                         )
                     )
-            
+
             # Convert to tuple for covariant type safety
             messages_tuple: Sequence[
                 Union[ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam]
