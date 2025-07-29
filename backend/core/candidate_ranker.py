@@ -170,7 +170,7 @@ class CandidateRanker:
             columns = set()
 
             for table in statement.find_all(exp.Table):
-                tables.add(table.name.lower())
+                tables.add(str(table.name).lower())
 
             for column in statement.find_all(exp.Column):
                 if column.table:

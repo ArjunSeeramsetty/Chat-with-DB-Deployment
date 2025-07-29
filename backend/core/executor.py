@@ -50,7 +50,7 @@ class SQLExecutor:
 
             return ExecutionResult(
                 success=result[0],
-                data=result[1] if result[0] else [],
+                data=result[1] if result[0] and result[1] is not None else [],
                 row_count=len(result[1]) if result[0] and result[1] else 0,
                 error=result[2] if not result[0] else None,
                 execution_time=execution_time,

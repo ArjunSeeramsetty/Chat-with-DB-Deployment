@@ -104,11 +104,12 @@ class EnhancedSQLValidator:
                     warnings.append("SQL was auto-repaired")
                     confidence += 0.2
                     # Re-validate the repaired SQL
-                    repair_validation = self.validate_sql(fixed_sql)
-                    if repair_validation.is_valid:
-                        errors = repair_validation.errors
-                        warnings.extend(repair_validation.warnings)
-                        confidence = max(confidence, repair_validation.confidence)
+                    if fixed_sql:
+                        repair_validation = self.validate_sql(fixed_sql)
+                        if repair_validation.is_valid:
+                            errors = repair_validation.errors
+                            warnings.extend(repair_validation.warnings)
+                            confidence = max(confidence, repair_validation.confidence)
 
             is_valid = len(errors) == 0
             confidence = max(0.0, min(1.0, confidence))
