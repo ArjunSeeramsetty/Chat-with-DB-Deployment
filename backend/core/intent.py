@@ -303,6 +303,9 @@ class IntentAnalyzer:
 
                         # Try to parse with dateutil
                         parsed_date = parser.parse(expr, fuzzy=True)
+                        # Convert datetime to date if needed
+                        if hasattr(parsed_date, 'date'):
+                            parsed_date = parsed_date.date()
                         parsed_dates.append(parsed_date)
 
                     except Exception as e:
