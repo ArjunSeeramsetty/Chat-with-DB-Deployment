@@ -19,12 +19,22 @@ try:
 except ImportError:
     # Fallback types for when openai package is not available
     from typing import NewType
-    
-    ChatCompletionSystemMessageParam = NewType('ChatCompletionSystemMessageParam', Dict[str, str])
-    ChatCompletionUserMessageParam = NewType('ChatCompletionUserMessageParam', Dict[str, str])
-    ChatCompletionAssistantMessageParam = NewType('ChatCompletionAssistantMessageParam', Dict[str, str])
-    ChatCompletionToolMessageParam = NewType('ChatCompletionToolMessageParam', Dict[str, str])
-    ChatCompletionFunctionMessageParam = NewType('ChatCompletionFunctionMessageParam', Dict[str, str])
+
+    ChatCompletionSystemMessageParam = NewType(
+        "ChatCompletionSystemMessageParam", Dict[str, str]
+    )
+    ChatCompletionUserMessageParam = NewType(
+        "ChatCompletionUserMessageParam", Dict[str, str]
+    )
+    ChatCompletionAssistantMessageParam = NewType(
+        "ChatCompletionAssistantMessageParam", Dict[str, str]
+    )
+    ChatCompletionToolMessageParam = NewType(
+        "ChatCompletionToolMessageParam", Dict[str, str]
+    )
+    ChatCompletionFunctionMessageParam = NewType(
+        "ChatCompletionFunctionMessageParam", Dict[str, str]
+    )
 
 logger = logging.getLogger(__name__)
 
