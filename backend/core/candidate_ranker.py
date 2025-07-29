@@ -191,9 +191,9 @@ class CandidateRanker:
                 column_matches = 0
                 for column_ref in columns:
                     if "." in column_ref:
-                        table, col = column_ref.split(".", 1)
-                        if table in self.schema_info:
-                            table_columns = [c.lower() for c in self.schema_info[table]]
+                        table_name, col = column_ref.split(".", 1)
+                        if table_name in self.schema_info:
+                            table_columns = [c.lower() for c in self.schema_info[table_name]]
                             if col in table_columns:
                                 column_matches += 1
                 column_score = column_matches / len(columns)

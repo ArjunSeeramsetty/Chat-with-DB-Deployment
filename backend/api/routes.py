@@ -435,7 +435,7 @@ async def test_monthly_functionality(request: QueryRequest):
         # Create context
         context = ContextInfo(
             query_analysis=analysis,
-            schema_info=schema_info,
+            schema_info=SchemaInfo(tables=schema_info) if schema_info else None,
             schema_linker=schema_linker,
             dimension_values={},
             user_mappings=[],
@@ -530,7 +530,7 @@ async def ask_question_fixed(request: QueryRequest):
         from backend.core.assembler import SQLAssembler
         from backend.core.intent import IntentAnalyzer
         from backend.core.schema_linker import SchemaLinker
-        from backend.core.types import ContextInfo, QueryAnalysis
+        from backend.core.types import ContextInfo, QueryAnalysis, SchemaInfo
         from backend.services.rag_service import EnhancedRAGService
 
         # Validate request
