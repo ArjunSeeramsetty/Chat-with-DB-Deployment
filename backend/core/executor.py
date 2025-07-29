@@ -88,7 +88,10 @@ class SQLExecutor:
                     if rows:
                         columns = [description[0] for description in cursor.description]
                         logger.info(f"Columns: {columns}")
-                        data = [{str(col): val for col, val in zip(columns, row)} for row in rows]
+                        data = [
+                            {str(col): val for col, val in zip(columns, row)}
+                            for row in rows
+                        ]
                         logger.info(f"Converted to {len(data)} data records")
                         logger.info(f"First row: {data[0] if data else 'None'}")
                     else:
