@@ -828,13 +828,23 @@ class SchemaLinker:
                 ],
                 "priority": 0.8,
             },
-            "FactExchangeData": {
-                "keywords": ["exchange", "import", "export", "trading", "bilateral"],
+            "FactCountryDailyExchange": {
+                "keywords": ["exchange", "import", "export", "trading", "bilateral", "country"],
                 "metrics": ["import", "export", "energy", "trading"],
                 "priority": 0.7,
             },
-            "FactTransmissionData": {
-                "keywords": ["transmission", "loading", "corridor", "line"],
+            "FactTransnationalExchangeDetail": {
+                "keywords": ["exchange", "import", "export", "trading", "bilateral", "transnational"],
+                "metrics": ["import", "export", "energy", "trading"],
+                "priority": 0.7,
+            },
+            "FactTransmissionLinkFlow": {
+                "keywords": ["transmission", "loading", "corridor", "line", "domestic"],
+                "metrics": ["loading", "capacity", "transmission"],
+                "priority": 0.6,
+            },
+            "FactInternationalTransmissionLinkFlow": {
+                "keywords": ["transmission", "loading", "corridor", "line", "international", "nepal", "bhutan", "bangladesh"],
                 "metrics": ["loading", "capacity", "transmission"],
                 "priority": 0.6,
             },

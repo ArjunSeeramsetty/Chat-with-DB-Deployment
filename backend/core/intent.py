@@ -752,16 +752,50 @@ Return ONLY the JSON object, no explanations or code:"""
         """
         Fallback analysis when the main analysis fails.
         """
+        # Determine the appropriate query type based on the query content
+        query_lower = query.lower()
+        
+        # Check for region-related keywords
+        region_keywords = ["region", "regions", "northern", "southern", "eastern", "western", "north eastern"]
+        state_keywords = ["state", "states", "maharashtra", "karnataka", "tamil nadu", "gujarat", "andhra pradesh"]
+        generation_keywords = ["generation", "coal", "thermal", "solar", "wind", "nuclear", "hydro", "gas", "biomass"]
+        
+        if any(keyword in query_lower for keyword in region_keywords):
+            query_type = QueryType.REGION
+            main_table = "FactAllIndiaDailySummary"
+            dimension_table = "DimRegions"
+            join_key = "RegionID"
+            name_column = "RegionName"
+        elif any(keyword in query_lower for keyword in state_keywords):
+            query_type = QueryType.STATE
+            main_table = "FactStateDailyEnergy"
+            dimension_table = "DimStates"
+            join_key = "StateID"
+            name_column = "StateName"
+        elif any(keyword in query_lower for keyword in generation_keywords):
+            query_type = QueryType.GENERATION
+            main_table = "FactDailyGenerationBreakdown"
+            dimension_table = "DimGenerationSources"
+            join_key = "GenerationSourceID"
+            name_column = "SourceName"
+        else:
+            # Default to region for Energy Met queries
+            query_type = QueryType.REGION
+            main_table = "FactAllIndiaDailySummary"
+            dimension_table = "DimRegions"
+            join_key = "RegionID"
+            name_column = "RegionName"
+        
         return QueryAnalysis(
-            query_type=QueryType.GENERATION,
+            query_type=query_type,
             intent=IntentType.DATA_RETRIEVAL,
             entities=[],
             time_period=None,
             metrics=[],
             confidence=0.3,
-            main_table="FactStateDailyEnergy",
-            dimension_table="DimRegions",
-            join_key="RegionID",
-            name_column="RegionName",
+            main_table=main_table,
+            dimension_table=dimension_table,
+            join_key=join_key,
+            name_column=name_column,
             detected_keywords=[],
         )

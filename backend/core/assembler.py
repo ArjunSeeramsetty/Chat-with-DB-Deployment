@@ -119,264 +119,6 @@ class SQLAssembler:
                 GROUP BY dc.CountryName, dt.Year, dt.Month, dt.DayOfMonth
                 ORDER BY {column_alias} DESC
             """,
-            "monthly_growth_query": """
-                SELECT 
-                    current.{region_column},
-                    current.Month,
-                    current.SourceName,
-                    current.MonthlyValue as {current_alias},
-                    previous.MonthlyValue as {previous_alias},
-                    CASE 
-                        WHEN previous.MonthlyValue IS NULL THEN NULL
-                        WHEN previous.MonthlyValue = 0 THEN NULL
-                        ELSE ROUND(((current.MonthlyValue - previous.MonthlyValue) / previous.MonthlyValue) * 100, 2)
-                    END as GrowthPercentage,
-                    CASE 
-                        WHEN previous.MonthlyValue IS NULL THEN 'No Previous Data'
-                        WHEN ((current.MonthlyValue - previous.MonthlyValue) / previous.MonthlyValue) * 100 > 0 THEN 'Growth'
-                        WHEN ((current.MonthlyValue - previous.MonthlyValue) / previous.MonthlyValue) * 100 < 0 THEN 'Decline'
-                        ELSE 'No Change'
-                    END as Trend
-                FROM (
-                    SELECT 
-                        d.{region_column},
-                        dt.Month,
-                        gs1.SourceName,
-                        ROUND(SUM(f.{energy_column}), 2) as MonthlyValue
-                    FROM {table} f
-                    {join_clause}
-                    JOIN DimGenerationSources gs1 ON f.GenerationSourceID = gs1.GenerationSourceID
-                    JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE {where_clause}
-                    GROUP BY d.{region_column}, dt.Year, dt.Month, gs1.SourceName
-                ) current
-                LEFT JOIN (
-                    SELECT 
-                        d.{region_column},
-                        dt.Month,
-                        gs2.SourceName,
-                        ROUND(SUM(f.{energy_column}), 2) as MonthlyValue
-                    FROM {table} f
-                    {join_clause}
-                    JOIN DimGenerationSources gs2 ON f.GenerationSourceID = gs2.GenerationSourceID
-                    JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE {previous_where_clause}
-                    GROUP BY d.{region_column}, dt.Year, dt.Month, gs2.SourceName
-                ) previous ON 
-                    current.{region_column} = previous.{region_column} AND
-                    current.SourceName = previous.SourceName AND
-                    (current.Month = previous.Month + 1 OR (current.Month = 1 AND previous.Month = 12))
-                ORDER BY current.{region_column}, current.SourceName, current.Month
-            """,
-            "weekly_growth_query": """
-                SELECT 
-                    current.{region_column},
-                    current.Week,
-                    current.SourceName,
-                    current.WeeklyValue as {current_alias},
-                    previous.WeeklyValue as {previous_alias},
-                    CASE 
-                        WHEN previous.WeeklyValue IS NULL THEN NULL
-                        WHEN previous.WeeklyValue = 0 THEN NULL
-                        ELSE ROUND(((current.WeeklyValue - previous.WeeklyValue) / previous.WeeklyValue) * 100, 2)
-                    END as GrowthPercentage,
-                    CASE 
-                        WHEN previous.WeeklyValue IS NULL THEN 'No Previous Data'
-                        WHEN ((current.WeeklyValue - previous.WeeklyValue) / previous.WeeklyValue) * 100 > 0 THEN 'Growth'
-                        WHEN ((current.WeeklyValue - previous.WeeklyValue) / previous.WeeklyValue) * 100 < 0 THEN 'Decline'
-                        ELSE 'No Change'
-                    END as Trend
-                FROM (
-                    SELECT 
-                        d.{region_column},
-                        dt.Week,
-                        gs1.SourceName,
-                        ROUND(SUM(f.{energy_column}), 2) as WeeklyValue
-                    FROM {table} f
-                    {join_clause}
-                    JOIN DimGenerationSources gs1 ON f.GenerationSourceID = gs1.GenerationSourceID
-                    JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE {where_clause}
-                    GROUP BY d.{region_column}, dt.Year, dt.Week, gs1.SourceName
-                ) current
-                LEFT JOIN (
-                    SELECT 
-                        d.{region_column},
-                        dt.Week,
-                        gs2.SourceName,
-                        ROUND(SUM(f.{energy_column}), 2) as WeeklyValue
-                    FROM {table} f
-                    {join_clause}
-                    JOIN DimGenerationSources gs2 ON f.GenerationSourceID = gs2.GenerationSourceID
-                    JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE {previous_where_clause}
-                    GROUP BY d.{region_column}, dt.Year, dt.Week, gs2.SourceName
-                ) previous ON 
-                    current.{region_column} = previous.{region_column} AND
-                    current.SourceName = previous.SourceName AND
-                    current.Week = previous.Week + 1
-                ORDER BY current.{region_column}, current.SourceName, current.Week
-            """,
-            "daily_growth_query": """
-                SELECT 
-                    current.{region_column},
-                    current.DayOfMonth,
-                    current.SourceName,
-                    current.DailyValue as {current_alias},
-                    previous.DailyValue as {previous_alias},
-                    CASE 
-                        WHEN previous.DailyValue IS NULL THEN NULL
-                        WHEN previous.DailyValue = 0 THEN NULL
-                        ELSE ROUND(((current.DailyValue - previous.DailyValue) / previous.DailyValue) * 100, 2)
-                    END as GrowthPercentage,
-                    CASE 
-                        WHEN previous.DailyValue IS NULL THEN 'No Previous Data'
-                        WHEN ((current.DailyValue - previous.DailyValue) / previous.DailyValue) * 100 > 0 THEN 'Growth'
-                        WHEN ((current.DailyValue - previous.DailyValue) / previous.DailyValue) * 100 < 0 THEN 'Decline'
-                        ELSE 'No Change'
-                    END as Trend
-                FROM (
-                    SELECT 
-                        d.{region_column},
-                        dt.DayOfMonth,
-                        gs1.SourceName,
-                        ROUND(SUM(f.{energy_column}), 2) as DailyValue
-                    FROM {table} f
-                    {join_clause}
-                    JOIN DimGenerationSources gs1 ON f.GenerationSourceID = gs1.GenerationSourceID
-                    JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE {where_clause}
-                    GROUP BY d.{region_column}, dt.Year, dt.Month, dt.DayOfMonth, gs1.SourceName
-                ) current
-                LEFT JOIN (
-                    SELECT 
-                        d.{region_column},
-                        dt.DayOfMonth,
-                        gs2.SourceName,
-                        ROUND(SUM(f.{energy_column}), 2) as DailyValue
-                    FROM {table} f
-                    {join_clause}
-                    JOIN DimGenerationSources gs2 ON f.GenerationSourceID = gs2.GenerationSourceID
-                    JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE {previous_where_clause}
-                    GROUP BY d.{region_column}, dt.Year, dt.Month, dt.DayOfMonth, gs2.SourceName
-                ) previous ON 
-                    current.{region_column} = previous.{region_column} AND
-                    current.SourceName = previous.SourceName AND
-                    current.DayOfMonth = previous.DayOfMonth + 1
-                ORDER BY current.{region_column}, current.SourceName, current.DayOfMonth
-            """,
-            "yearly_growth_query": """
-                SELECT 
-                    current.{region_column},
-                    current.Year,
-                    current.SourceName,
-                    current.YearlyValue as {current_alias},
-                    previous.YearlyValue as {previous_alias},
-                    CASE 
-                        WHEN previous.YearlyValue IS NULL THEN NULL
-                        WHEN previous.YearlyValue = 0 THEN NULL
-                        ELSE ROUND(((current.YearlyValue - previous.YearlyValue) / previous.YearlyValue) * 100, 2)
-                    END as GrowthPercentage,
-                    CASE 
-                        WHEN previous.YearlyValue IS NULL THEN 'No Previous Data'
-                        WHEN ((current.YearlyValue - previous.YearlyValue) / previous.YearlyValue) * 100 > 0 THEN 'Growth'
-                        WHEN ((current.YearlyValue - previous.YearlyValue) / previous.YearlyValue) * 100 < 0 THEN 'Decline'
-                        ELSE 'No Change'
-                    END as Trend
-                FROM (
-                    SELECT 
-                        d.{region_column},
-                        dt.Year,
-                        gs1.SourceName,
-                        ROUND(SUM(f.{energy_column}), 2) as YearlyValue
-                    FROM {table} f
-                    {join_clause}
-                    JOIN DimGenerationSources gs1 ON f.GenerationSourceID = gs1.GenerationSourceID
-                    JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE {where_clause}
-                    GROUP BY d.{region_column}, dt.Year, gs1.SourceName
-                ) current
-                LEFT JOIN (
-                    SELECT 
-                        d.{region_column},
-                        dt.Year,
-                        gs2.SourceName,
-                        ROUND(SUM(f.{energy_column}), 2) as YearlyValue
-                    FROM {table} f
-                    {join_clause}
-                    JOIN DimGenerationSources gs2 ON f.GenerationSourceID = gs2.GenerationSourceID
-                    JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE {previous_where_clause}
-                    GROUP BY d.{region_column}, dt.Year, gs2.SourceName
-                ) previous ON 
-                    current.{region_column} = previous.{region_column} AND
-                    current.SourceName = previous.SourceName AND
-                    current.Year = previous.Year + 1
-                ORDER BY current.{region_column}, current.SourceName, current.Year
-            """,
-            "quarterly_growth_query": """
-                WITH QuarterlyData AS (
-                    SELECT 
-                        dt.Year,
-                        CASE 
-                            WHEN dt.Month IN (1,2,3) THEN 'Q1'
-                            WHEN dt.Month IN (4,5,6) THEN 'Q2'
-                            WHEN dt.Month IN (7,8,9) THEN 'Q3'
-                            WHEN dt.Month IN (10,11,12) THEN 'Q4'
-                        END as Quarter,
-                        {region_column},
-                        ROUND({aggregation_function}(f.{energy_column}), 2) as QuarterlyValue
-                    FROM {table} f
-                    JOIN DimDates dt ON f.DateID = dt.DateID
-                    {join_clause}
-                    WHERE {where_clause}
-                    GROUP BY dt.Year, 
-                        CASE 
-                            WHEN dt.Month IN (1,2,3) THEN 'Q1'
-                            WHEN dt.Month IN (4,5,6) THEN 'Q2'
-                            WHEN dt.Month IN (7,8,9) THEN 'Q3'
-                            WHEN dt.Month IN (10,11,12) THEN 'Q4'
-                        END,
-                        {region_column}
-                    ORDER BY dt.Year, Quarter, {region_column}
-                ),
-                GrowthData AS (
-                    SELECT 
-                        q1.Year,
-                        q1.Quarter,
-                        q1.{region_column},
-                        q1.QuarterlyValue,
-                        q2.QuarterlyValue as PreviousQuarterValue,
-                        CASE 
-                            WHEN q2.QuarterlyValue IS NULL THEN NULL
-                            WHEN q2.QuarterlyValue = 0 THEN NULL
-                            ELSE ROUND(((q1.QuarterlyValue - q2.QuarterlyValue) / q2.QuarterlyValue) * 100, 2)
-                        END as GrowthPercentage
-                    FROM QuarterlyData q1
-                    LEFT JOIN QuarterlyData q2 ON 
-                        q1.{region_column} = q2.{region_column} AND
-                        (q1.Year = q2.Year AND 
-                         ((q1.Quarter = 'Q2' AND q2.Quarter = 'Q1') OR
-                          (q1.Quarter = 'Q3' AND q2.Quarter = 'Q2') OR
-                          (q1.Quarter = 'Q4' AND q2.Quarter = 'Q3')) OR
-                         (q1.Year = q2.Year + 1 AND q1.Quarter = 'Q1' AND q2.Quarter = 'Q4'))
-                )
-                SELECT 
-                    {region_column},
-                    Quarter,
-                    QuarterlyValue,
-                    PreviousQuarterValue,
-                    GrowthPercentage,
-                    CASE 
-                        WHEN GrowthPercentage IS NULL THEN 'No Previous Data'
-                        WHEN GrowthPercentage > 0 THEN 'Growth'
-                        WHEN GrowthPercentage < 0 THEN 'Decline'
-                        ELSE 'No Change'
-                    END as Trend
-                FROM GrowthData
-                ORDER BY {region_column}, Year, Quarter
-            """,
             "time_block_query": """
                 SELECT ROUND({aggregation_function}(ftb.{energy_column}), 2) as {column_alias}
                 FROM FactTimeBlockPowerData ftb
@@ -392,6 +134,240 @@ class SQLAssembler:
                 {where_clause}
                 GROUP BY dgs.SourceName, ftbg.BlockNumber
                 ORDER BY TotalGeneration DESC
+            """,
+            "monthly_dynamic_growth_query": """
+                SELECT 
+                    current.{name_column},
+                    current.Month,
+                    current.MonthlyValue as {current_alias},
+                    previous.MonthlyValue as {previous_alias},
+                    CASE 
+                        WHEN previous.MonthlyValue IS NULL THEN NULL
+                        WHEN previous.MonthlyValue = 0 THEN NULL
+                        ELSE ROUND(((current.MonthlyValue - previous.MonthlyValue) / previous.MonthlyValue) * 100, 2)
+                    END as GrowthPercentage,
+                    CASE 
+                        WHEN previous.MonthlyValue IS NULL THEN 'No Previous Data'
+                        WHEN ((current.MonthlyValue - previous.MonthlyValue) / previous.MonthlyValue) * 100 > 0 THEN 'Growth'
+                        WHEN ((current.MonthlyValue - previous.MonthlyValue) / previous.MonthlyValue) * 100 < 0 THEN 'Decline'
+                        ELSE 'No Change'
+                    END as Trend
+                FROM (
+                    SELECT 
+                        d.{name_column},
+                        dt.Month,
+                        ROUND(SUM(f.{energy_column}), 2) as MonthlyValue
+                    FROM {main_table} f
+                    {join_clause}
+                    JOIN DimDates dt ON f.DateID = dt.DateID
+                    WHERE {where_clause}
+                    GROUP BY d.{name_column}, dt.Year, dt.Month
+                ) current
+                LEFT JOIN (
+                    SELECT 
+                        d.{name_column},
+                        dt.Month,
+                        ROUND(SUM(f.{energy_column}), 2) as MonthlyValue
+                    FROM {main_table} f
+                    {join_clause}
+                    JOIN DimDates dt ON f.DateID = dt.DateID
+                    WHERE {previous_where_clause}
+                    GROUP BY d.{name_column}, dt.Year, dt.Month
+                ) previous ON 
+                    current.{name_column} = previous.{name_column} AND
+                    (current.Month = previous.Month + 1 OR (current.Month = 1 AND previous.Month = 12))
+                ORDER BY current.{name_column}, current.Month
+            """,
+            "weekly_dynamic_growth_query": """
+                SELECT 
+                    current.{name_column},
+                    current.Week,
+                    current.WeeklyValue as {current_alias},
+                    previous.WeeklyValue as {previous_alias},
+                    CASE 
+                        WHEN previous.WeeklyValue IS NULL THEN NULL
+                        WHEN previous.WeeklyValue = 0 THEN NULL
+                        ELSE ROUND(((current.WeeklyValue - previous.WeeklyValue) / previous.WeeklyValue) * 100, 2)
+                    END as GrowthPercentage,
+                    CASE 
+                        WHEN previous.WeeklyValue IS NULL THEN 'No Previous Data'
+                        WHEN ((current.WeeklyValue - previous.WeeklyValue) / previous.WeeklyValue) * 100 > 0 THEN 'Growth'
+                        WHEN ((current.WeeklyValue - previous.WeeklyValue) / previous.WeeklyValue) * 100 < 0 THEN 'Decline'
+                        ELSE 'No Change'
+                    END as Trend
+                FROM (
+                    SELECT 
+                        d.{name_column},
+                        dt.Week,
+                        ROUND(SUM(f.{energy_column}), 2) as WeeklyValue
+                    FROM {main_table} f
+                    {join_clause}
+                    JOIN DimDates dt ON f.DateID = dt.DateID
+                    WHERE {where_clause}
+                    GROUP BY d.{name_column}, dt.Year, dt.Week
+                ) current
+                LEFT JOIN (
+                    SELECT 
+                        d.{name_column},
+                        dt.Week,
+                        ROUND(SUM(f.{energy_column}), 2) as WeeklyValue
+                    FROM {main_table} f
+                    {join_clause}
+                    JOIN DimDates dt ON f.DateID = dt.DateID
+                    WHERE {previous_where_clause}
+                    GROUP BY d.{name_column}, dt.Year, dt.Week
+                ) previous ON 
+                    current.{name_column} = previous.{name_column} AND
+                    current.Week = previous.Week + 1
+                ORDER BY current.{name_column}, current.Week
+            """,
+            "daily_dynamic_growth_query": """
+                SELECT 
+                    current.{name_column},
+                    current.DayOfMonth,
+                    current.DailyValue as {current_alias},
+                    previous.DailyValue as {previous_alias},
+                    CASE 
+                        WHEN previous.DailyValue IS NULL THEN NULL
+                        WHEN previous.DailyValue = 0 THEN NULL
+                        ELSE ROUND(((current.DailyValue - previous.DailyValue) / previous.DailyValue) * 100, 2)
+                    END as GrowthPercentage,
+                    CASE 
+                        WHEN previous.DailyValue IS NULL THEN 'No Previous Data'
+                        WHEN ((current.DailyValue - previous.DailyValue) / previous.DailyValue) * 100 > 0 THEN 'Growth'
+                        WHEN ((current.DailyValue - previous.DailyValue) / previous.DailyValue) * 100 < 0 THEN 'Decline'
+                        ELSE 'No Change'
+                    END as Trend
+                FROM (
+                    SELECT 
+                        d.{name_column},
+                        dt.DayOfMonth,
+                        ROUND(SUM(f.{energy_column}), 2) as DailyValue
+                    FROM {main_table} f
+                    {join_clause}
+                    JOIN DimDates dt ON f.DateID = dt.DateID
+                    WHERE {where_clause}
+                    GROUP BY d.{name_column}, dt.Year, dt.Month, dt.DayOfMonth
+                ) current
+                LEFT JOIN (
+                    SELECT 
+                        d.{name_column},
+                        dt.DayOfMonth,
+                        ROUND(SUM(f.{energy_column}), 2) as DailyValue
+                    FROM {main_table} f
+                    {join_clause}
+                    JOIN DimDates dt ON f.DateID = dt.DateID
+                    WHERE {previous_where_clause}
+                    GROUP BY d.{name_column}, dt.Year, dt.Month, dt.DayOfMonth
+                ) previous ON 
+                    current.{name_column} = previous.{name_column} AND
+                    current.DayOfMonth = previous.DayOfMonth + 1
+                ORDER BY current.{name_column}, current.DayOfMonth
+            """,
+            "yearly_dynamic_growth_query": """
+                SELECT 
+                    current.{name_column},
+                    current.Year,
+                    current.YearlyValue as {current_alias},
+                    previous.YearlyValue as {previous_alias},
+                    CASE 
+                        WHEN previous.YearlyValue IS NULL THEN NULL
+                        WHEN previous.YearlyValue = 0 THEN NULL
+                        ELSE ROUND(((current.YearlyValue - previous.YearlyValue) / previous.YearlyValue) * 100, 2)
+                    END as GrowthPercentage,
+                    CASE 
+                        WHEN previous.YearlyValue IS NULL THEN 'No Previous Data'
+                        WHEN ((current.YearlyValue - previous.YearlyValue) / previous.YearlyValue) * 100 > 0 THEN 'Growth'
+                        WHEN ((current.YearlyValue - previous.YearlyValue) / previous.YearlyValue) * 100 < 0 THEN 'Decline'
+                        ELSE 'No Change'
+                    END as Trend
+                FROM (
+                    SELECT 
+                        d.{name_column},
+                        dt.Year,
+                        ROUND(SUM(f.{energy_column}), 2) as YearlyValue
+                    FROM {main_table} f
+                    {join_clause}
+                    JOIN DimDates dt ON f.DateID = dt.DateID
+                    WHERE {where_clause}
+                    GROUP BY d.{name_column}, dt.Year
+                ) current
+                LEFT JOIN (
+                    SELECT 
+                        d.{name_column},
+                        dt.Year,
+                        ROUND(SUM(f.{energy_column}), 2) as YearlyValue
+                    FROM {main_table} f
+                    {join_clause}
+                    JOIN DimDates dt ON f.DateID = dt.DateID
+                    WHERE {previous_where_clause}
+                    GROUP BY d.{name_column}, dt.Year
+                ) previous ON 
+                    current.{name_column} = previous.{name_column} AND
+                    current.Year = previous.Year + 1
+                ORDER BY current.{name_column}, current.Year
+            """,
+            "quarterly_dynamic_growth_query": """
+                WITH QuarterlyData AS (
+                    SELECT 
+                        dt.Year,
+                        CASE 
+                            WHEN dt.Month IN (1,2,3) THEN 'Q1'
+                            WHEN dt.Month IN (4,5,6) THEN 'Q2'
+                            WHEN dt.Month IN (7,8,9) THEN 'Q3'
+                            WHEN dt.Month IN (10,11,12) THEN 'Q4'
+                        END as Quarter,
+                        d.{name_column},
+                        ROUND(SUM(f.{energy_column}), 2) as QuarterlyValue
+                    FROM {main_table} f
+                    {join_clause}
+                    JOIN DimDates dt ON f.DateID = dt.DateID
+                    WHERE {where_clause}
+                    GROUP BY dt.Year, 
+                        CASE 
+                            WHEN dt.Month IN (1,2,3) THEN 'Q1'
+                            WHEN dt.Month IN (4,5,6) THEN 'Q2'
+                            WHEN dt.Month IN (7,8,9) THEN 'Q3'
+                            WHEN dt.Month IN (10,11,12) THEN 'Q4'
+                        END,
+                        d.{name_column}
+                    ORDER BY dt.Year, Quarter, d.{name_column}
+                ),
+                GrowthData AS (
+                    SELECT 
+                        q1.Year,
+                        q1.Quarter,
+                        q1.{name_column},
+                        q1.QuarterlyValue,
+                        q2.QuarterlyValue as PreviousQuarterValue,
+                        CASE 
+                            WHEN q2.QuarterlyValue IS NULL THEN NULL
+                            WHEN q2.QuarterlyValue = 0 THEN NULL
+                            ELSE ROUND(((q1.QuarterlyValue - q2.QuarterlyValue) / q2.QuarterlyValue) * 100, 2)
+                        END as GrowthPercentage
+                    FROM QuarterlyData q1
+                    LEFT JOIN QuarterlyData q2 ON 
+                        q1.{name_column} = q2.{name_column} AND
+                        (q1.Year = q2.Year AND 
+                         ((q1.Quarter = 'Q2' AND q2.Quarter = 'Q1') OR
+                          (q1.Quarter = 'Q3' AND q2.Quarter = 'Q2') OR
+                          (q1.Quarter = 'Q4' AND q2.Quarter = 'Q3')) OR
+                         (q1.Year = q2.Year + 1 AND q1.Quarter = 'Q1' AND q2.Quarter = 'Q4'))
+                )
+                SELECT 
+                    {name_column},
+                    Quarter,
+                    QuarterlyValue,
+                    PreviousQuarterValue,
+                    GrowthPercentage,
+                    CASE 
+                        WHEN GrowthPercentage IS NULL THEN 'No Previous Data'
+                        WHEN GrowthPercentage > 0 THEN 'Growth'
+                        WHEN GrowthPercentage < 0 THEN 'Decline'
+                        ELSE 'No Change'
+                    END as Trend
+                FROM GrowthData
+                ORDER BY {name_column}, Year, Quarter
             """,
         }
 
@@ -640,204 +616,12 @@ class SQLAssembler:
         logger.info(f"Query type: {analysis.query_type.value}")
         logger.info(f"Intent: {analysis.intent.value}")
 
-        # Check for growth queries first
-        if (
-            analysis.intent.value == "trend_analysis"
-            and "growth" in analysis.detected_keywords
-        ):
-            logger.info(
-                f"Growth query detected - Intent: {analysis.intent.value}, Keywords: {analysis.detected_keywords}"
-            )
-
-            # Determine growth type (monthly, quarterly, yearly)
-            original_query_lower = original_query.lower() if original_query else ""
-            growth_type = "monthly"  # Default
-
-            if any(
-                word in original_query_lower
-                for word in ["quarterly", "quarter", "q1", "q2", "q3", "q4"]
-            ):
-                growth_type = "quarterly"
-            elif any(
-                word in original_query_lower
-                for word in ["yearly", "annual", "year over year"]
-            ):
-                growth_type = "yearly"
-            elif any(
-                word in original_query_lower for word in ["monthly", "month over month"]
-            ):
-                growth_type = "monthly"
-
-            logger.info(f"Detected growth type: {growth_type}")
-
-            # Extract entities dynamically
-            region_name = None
-            state_name = None
-            year = None
-
-            # Extract region/state from entities (currently returns list of strings)
-            if analysis.entities:
-                # Get entity lists for comparison
-                try:
-                    from backend.core.entity_loader import get_entity_loader
-
-                    entity_loader = get_entity_loader()
-                    indian_regions = entity_loader.get_indian_regions()
-                    indian_states = entity_loader.get_indian_states()
-
-                    for entity in analysis.entities:
-                        # Check if it's a region
-                        if entity.lower() in [
-                            region.lower() for region in indian_regions
-                        ]:
-                            region_name = entity
-                        # Check if it's a state
-                        elif entity.lower() in [
-                            state.lower() for state in indian_states
-                        ]:
-                            state_name = entity
-                except ImportError:
-                    # Fallback if entity loader is not available
-                    logger.warning("Entity loader not available, using default values")
-                    region_name = None
-                    state_name = None
-
-            # Extract year from time_period
-            if analysis.time_period:
-                # Check for different possible keys in time_period
-                if analysis.time_period.get("year"):
-                    year = analysis.time_period.get("year")
-                elif analysis.time_period.get("start_year"):
-                    year = analysis.time_period.get("start_year")
-                else:
-                    # Default to current year if not specified
-                    from datetime import datetime
-
-                    year = datetime.now().year
-            else:
-                # Default to current year if not specified
-                from datetime import datetime
-
-                year = datetime.now().year
-
-            # Auto-determine table and configuration
-            if context.schema_linker is None:
-                logger.error("Schema linker is None, cannot generate SQL")
-                return None
-
-            table, table_confidence = context.schema_linker.get_best_table_match(
-                original_query, analysis
-            )
-            table_config = context.schema_linker.get_table_config(table, original_query)
-
-            # Get energy column from schema linker
-            energy_column = (
-                context.schema_linker.get_best_column_match(
-                    user_query=original_query, table_name=table, query_type="energy"
-                )
-                or "EnergyMet"
-            )
-
-            # Determine aggregation function
-            aggregation_function = "SUM"  # Default
-            if original_query and "average" in original_query.lower():
-                aggregation_function = "AVG"
-            elif original_query and "maximum" in original_query.lower():
-                aggregation_function = "MAX"
-            elif original_query and "minimum" in original_query.lower():
-                aggregation_function = "MIN"
-
-            # Build where clause
-            year = (
-                analysis.time_period.get("year")
-                if analysis.time_period and analysis.time_period.get("year") is not None
-                else datetime.now().year
-            )
-            where_clause = f"dt.Year = {year}"
-
-            # Detect generation source from query
-            generation_source = self._detect_generation_source(original_query)
-            if generation_source:
-                logger.info(f"Detected generation source: {generation_source}")
-                where_clause = self._add_source_filtering(
-                    where_clause, generation_source
-                )
-
-            # Add entity filter if not "all" query
-            if not (
-                "all" in original_query.lower()
-                and any(
-                    word in original_query.lower() for word in ["regions", "states"]
-                )
-            ):
-                if analysis.entities:
-                    # Use the first entity found
-                    entity = analysis.entities[0]
-                    where_clause += f" AND d.{table_config['name_column']} = '{entity}'"
-
-            # Create separate WHERE clauses for current and previous data
-            current_where_clause = where_clause
-            if year is not None:
-                previous_where_clause = where_clause.replace(
-                    f"dt.Year = {year}", f"dt.Year = {year - 1}"
-                )
-            else:
-                previous_where_clause = where_clause
-
-            # Select appropriate template
-            template_key = f"{growth_type}_growth_query"
-            if template_key in self.sql_templates:
-                template = self.sql_templates[template_key]
-
-                # Generate dynamic column aliases
-                current_alias, previous_alias = self._generate_growth_column_aliases(
-                    energy_column, growth_type
-                )
-
-                sql = template.format(
-                    table=table,
-                    energy_column=energy_column,
-                    join_clause=table_config["join_clause"],
-                    where_clause=current_where_clause,
-                    previous_where_clause=previous_where_clause,
-                    aggregation_function=aggregation_function,
-                    region_column=table_config["name_column"],
-                    current_alias=current_alias,
-                    previous_alias=previous_alias,
-                )
-                logger.info(
-                    f"Generated {growth_type} growth SQL with dynamic aliases: {sql[:100]}..."
-                )
-                return sql
-            else:
-                logger.warning(
-                    f"Template {template_key} not found, falling back to monthly"
-                )
-                template = self.sql_templates["monthly_growth_query"]
-
-                # Generate dynamic column aliases for fallback
-                current_alias, previous_alias = self._generate_growth_column_aliases(
-                    energy_column, "monthly"
-                )
-
-                sql = template.format(
-                    table=table,
-                    energy_column=energy_column,
-                    join_clause=table_config["join_clause"],
-                    where_clause=current_where_clause,
-                    previous_where_clause=previous_where_clause,
-                    aggregation_function=aggregation_function,
-                    region_column=table_config["name_column"],
-                    current_alias=current_alias,
-                    previous_alias=previous_alias,
-                )
-                logger.info(
-                    f"Generated fallback monthly growth SQL with dynamic aliases: {sql[:100]}..."
-                )
-                return sql
+        # Growth queries are now handled by the dynamic template selection logic below
+        # This ensures all growth queries use the new dynamic templates that adapt to different tables and columns
 
         # Look for template based on query type and intent
         fallback_template_key: Optional[str] = None
+        template_key: Optional[str] = None  # Initialize template_key
         if analysis.query_type.value == "exchange_detail":
             fallback_template_key = "exchange_query"
         elif analysis.query_type.value == "exchange":
@@ -872,12 +656,6 @@ class SQLAssembler:
                 fallback_template_key = "generation_query"
         elif analysis.query_type.value == "state":
             fallback_template_key = "state_query"
-        elif analysis.query_type.value == "region":
-            fallback_template_key = "region_query"
-        elif analysis.query_type.value == "time_block_generation":
-            fallback_template_key = "time_block_generation_query"
-        elif analysis.query_type.value == "time_block":
-            fallback_template_key = "time_block_query"
         elif analysis.intent.value == "trend_analysis":
             # Dynamic trend analysis - determine template based on query content
             original_query_lower = original_query.lower() if original_query else ""
@@ -937,9 +715,9 @@ class SQLAssembler:
 
             # STEP 3: Select appropriate template
             if is_growth_query:
-                # Use growth template with time period
-                template_key = f"{time_period}_growth_query"
-                logger.info(f"Selected growth template: {template_key}")
+                # Use dynamic growth template that adapts based on query analysis
+                template_key = f"{time_period}_dynamic_growth_query"
+                logger.info(f"Selected dynamic growth template: {template_key}")
             elif is_aggregation_query:
                 # Use aggregation template based on query type
                 if analysis.query_type.value == "region":
@@ -955,8 +733,18 @@ class SQLAssembler:
                 # Default to region query if unclear
                 template_key = "region_query"
                 logger.info(f"Default template selected: {template_key}")
+        elif analysis.query_type.value == "region":
+            fallback_template_key = "region_query"
+        elif analysis.query_type.value == "time_block_generation":
+            fallback_template_key = "time_block_generation_query"
+        elif analysis.query_type.value == "time_block":
+            fallback_template_key = "time_block_query"
         else:
-            template_key = "region_query"  # Default
+            # For non-trend analysis queries, use fallback template selection
+            if fallback_template_key:
+                template_key = fallback_template_key
+            else:
+                template_key = "region_query"  # Default
 
         logger.info(
             f"Looking for template: {template_key}, Intent: {analysis.intent.value}, Keywords: {analysis.detected_keywords}"
@@ -1276,11 +1064,26 @@ class SQLAssembler:
                         # For aggregation queries, use time-based grouping
                         logger.info(f"Aggregation query - using time-based grouping")
 
+                        # Get table configuration from schema linker
+                        if hasattr(context, "schema_linker") and context.schema_linker:
+                            table_name = (
+                                "FactAllIndiaDailySummary"
+                                if analysis.query_type.value == "region"
+                                else "FactStateDailyEnergy"
+                            )
+                            table_config = context.schema_linker.get_table_config(table_name, original_query)
+                        else:
+                            # Fallback table configuration
+                            table_config = {
+                                "name_column": "RegionName" if analysis.query_type.value == "region" else "StateName",
+                                "join_clause": "JOIN DimRegions d ON f.RegionID = d.RegionID" if analysis.query_type.value == "region" else "JOIN DimStates d ON f.StateID = d.StateID"
+                            }
+
                         # Use time-based grouping for aggregation trend analysis
                         if time_period == "monthly":
                             sql = f"""
                                 SELECT d.{table_config['name_column']}, dt.Month, ROUND({aggregation_function}(f.{energy_column}), 2) as {column_alias}
-                                FROM {table} f
+                                FROM {table_name} f
                                 {table_config['join_clause']}
                                 JOIN DimDates dt ON f.DateID = dt.DateID
                                 {where_clause}
@@ -1290,7 +1093,7 @@ class SQLAssembler:
                         elif time_period == "quarterly":
                             sql = f"""
                                 SELECT d.{table_config['name_column']}, dt.Quarter, ROUND({aggregation_function}(f.{energy_column}), 2) as {column_alias}
-                                FROM {table} f
+                                FROM {table_name} f
                                 {table_config['join_clause']}
                                 JOIN DimDates dt ON f.DateID = dt.DateID
                                 {where_clause}
@@ -1300,7 +1103,7 @@ class SQLAssembler:
                         elif time_period == "weekly":
                             sql = f"""
                                 SELECT d.{table_config['name_column']}, dt.Week, ROUND({aggregation_function}(f.{energy_column}), 2) as {column_alias}
-                                FROM {table} f
+                                FROM {table_name} f
                                 {table_config['join_clause']}
                                 JOIN DimDates dt ON f.DateID = dt.DateID
                                 {where_clause}
@@ -1310,7 +1113,7 @@ class SQLAssembler:
                         elif time_period == "daily":
                             sql = f"""
                                 SELECT d.{table_config['name_column']}, dt.DayOfMonth, ROUND({aggregation_function}(f.{energy_column}), 2) as {column_alias}
-                                FROM {table} f
+                                FROM {table_name} f
                                 {table_config['join_clause']}
                                 JOIN DimDates dt ON f.DateID = dt.DateID
                                 {where_clause}
@@ -1320,7 +1123,7 @@ class SQLAssembler:
                         else:  # yearly or default
                             sql = f"""
                                 SELECT d.{table_config['name_column']}, dt.Year, ROUND({aggregation_function}(f.{energy_column}), 2) as {column_alias}
-                                FROM {table} f
+                                FROM {table_name} f
                                 {table_config['join_clause']}
                                 JOIN DimDates dt ON f.DateID = dt.DateID
                                 {where_clause}
@@ -1362,6 +1165,18 @@ class SQLAssembler:
                 sql = template.format(where_clause=where_clause)
                 logger.info(f"Generated time block generation SQL: {sql[:100]}...")
                 return sql
+
+            # Special handling for dynamic growth queries - they need dynamic table and column resolution
+            if template_key.endswith("_dynamic_growth_query"):
+                sql = self._process_dynamic_growth_template(
+                    template, analysis, context, original_query
+                )
+                if sql:
+                    logger.info(f"Generated dynamic growth SQL: {sql[:100]}...")
+                    return sql
+                else:
+                    logger.error("Failed to generate dynamic growth SQL")
+                    return None
 
             # Special handling for state queries - they need energy_column processing
             if template_key == "state_query":
@@ -2341,6 +2156,107 @@ class SQLAssembler:
             return "coal"
 
         return None
+
+    def _process_dynamic_growth_template(
+        self, template: str, analysis: QueryAnalysis, context: ContextInfo, original_query: str
+    ) -> Optional[str]:
+        """
+        Process dynamic growth templates by resolving table and column information dynamically.
+        """
+        try:
+            # Get table configuration based on query analysis
+            main_table = analysis.main_table
+            dimension_table = analysis.dimension_table
+            join_key = analysis.join_key
+            name_column = analysis.name_column
+            
+            logger.info(f"Dynamic growth template - Main table: {main_table}, Dimension table: {dimension_table}")
+            
+            # Build join clause dynamically
+            join_clause = f"JOIN {dimension_table} d ON f.{join_key} = d.{join_key}"
+            
+            # Get energy column from schema linker or use default
+            energy_column = "EnergyMet"  # Default
+            if hasattr(context, "schema_linker") and context.schema_linker:
+                energy_column = (
+                    context.schema_linker.get_best_column_match(
+                        user_query=original_query,
+                        table_name=main_table,
+                        query_type="energy"
+                    )
+                    or "EnergyMet"
+                )
+            
+            # Build where clause
+            where_clause = self._build_where_clause_from_entities(
+                analysis, context.user_mappings
+            )
+            
+            # Strip "WHERE" prefix if present (template expects just conditions)
+            if where_clause.startswith("WHERE "):
+                where_clause = where_clause[6:]  # Remove "WHERE "
+            
+            # Build previous where clause for growth comparison
+            previous_where_clause = self._build_previous_period_where_clause(
+                analysis, context.user_mappings
+            )
+            
+            # Strip "WHERE" prefix if present
+            if previous_where_clause.startswith("WHERE "):
+                previous_where_clause = previous_where_clause[6:]  # Remove "WHERE "
+            
+            # Generate column aliases
+            current_alias, previous_alias = self._generate_growth_column_aliases(
+                energy_column, "monthly"  # Default to monthly for now
+            )
+            
+            # Format the template with dynamic values
+            sql = template.format(
+                main_table=main_table,
+                join_clause=join_clause,
+                name_column=name_column,
+                energy_column=energy_column,
+                where_clause=where_clause,
+                previous_where_clause=previous_where_clause,
+                current_alias=current_alias,
+                previous_alias=previous_alias
+            )
+            
+            logger.info(f"Generated dynamic growth SQL with table: {main_table}, column: {energy_column}")
+            return sql
+            
+        except Exception as e:
+            logger.error(f"Error processing dynamic growth template: {str(e)}")
+            return None
+
+    def _build_previous_period_where_clause(
+        self, analysis: QueryAnalysis, user_mappings: List[UserMapping]
+    ) -> str:
+        """
+        Build WHERE clause for the previous period in growth queries.
+        """
+        conditions = []
+        
+        # Add entity conditions (same as current period)
+        for mapping in user_mappings:
+            table_name = mapping.entity.table
+            column_name = self._get_name_column(table_name)
+            value = mapping.entity.name
+            conditions.append(f"{table_name}.{column_name} = '{value}'")
+        
+        # Add time period conditions for previous period
+        if analysis.time_period:
+            time_period = analysis.time_period
+            if time_period.get("type") == "specific_date":
+                year = time_period.get("year")
+                if year:
+                    # Use same year for monthly growth (previous month within same year)
+                    conditions.append(f"dt.Year = {year}")
+        
+        if conditions:
+            return f"WHERE {' AND '.join(conditions)}"
+        
+        return ""
 
     def _add_source_filtering(self, where_clause: str, generation_source: str) -> str:
         """
