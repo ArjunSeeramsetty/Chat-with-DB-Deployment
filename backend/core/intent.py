@@ -754,12 +754,38 @@ Return ONLY the JSON object, no explanations or code:"""
         """
         # Determine the appropriate query type based on the query content
         query_lower = query.lower()
-        
+
         # Check for region-related keywords
-        region_keywords = ["region", "regions", "northern", "southern", "eastern", "western", "north eastern"]
-        state_keywords = ["state", "states", "maharashtra", "karnataka", "tamil nadu", "gujarat", "andhra pradesh"]
-        generation_keywords = ["generation", "coal", "thermal", "solar", "wind", "nuclear", "hydro", "gas", "biomass"]
-        
+        region_keywords = [
+            "region",
+            "regions",
+            "northern",
+            "southern",
+            "eastern",
+            "western",
+            "north eastern",
+        ]
+        state_keywords = [
+            "state",
+            "states",
+            "maharashtra",
+            "karnataka",
+            "tamil nadu",
+            "gujarat",
+            "andhra pradesh",
+        ]
+        generation_keywords = [
+            "generation",
+            "coal",
+            "thermal",
+            "solar",
+            "wind",
+            "nuclear",
+            "hydro",
+            "gas",
+            "biomass",
+        ]
+
         if any(keyword in query_lower for keyword in region_keywords):
             query_type = QueryType.REGION
             main_table = "FactAllIndiaDailySummary"
@@ -785,7 +811,7 @@ Return ONLY the JSON object, no explanations or code:"""
             dimension_table = "DimRegions"
             join_key = "RegionID"
             name_column = "RegionName"
-        
+
         return QueryAnalysis(
             query_type=query_type,
             intent=IntentType.DATA_RETRIEVAL,

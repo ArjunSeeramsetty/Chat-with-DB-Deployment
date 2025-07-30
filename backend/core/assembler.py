@@ -1071,12 +1071,22 @@ class SQLAssembler:
                                 if analysis.query_type.value == "region"
                                 else "FactStateDailyEnergy"
                             )
-                            table_config = context.schema_linker.get_table_config(table_name, original_query)
+                            table_config = context.schema_linker.get_table_config(
+                                table_name, original_query
+                            )
                         else:
                             # Fallback table configuration
                             table_config = {
-                                "name_column": "RegionName" if analysis.query_type.value == "region" else "StateName",
-                                "join_clause": "JOIN DimRegions d ON f.RegionID = d.RegionID" if analysis.query_type.value == "region" else "JOIN DimStates d ON f.StateID = d.StateID"
+                                "name_column": (
+                                    "RegionName"
+                                    if analysis.query_type.value == "region"
+                                    else "StateName"
+                                ),
+                                "join_clause": (
+                                    "JOIN DimRegions d ON f.RegionID = d.RegionID"
+                                    if analysis.query_type.value == "region"
+                                    else "JOIN DimStates d ON f.StateID = d.StateID"
+                                ),
                             }
 
                         # Use time-based grouping for aggregation trend analysis
@@ -2158,7 +2168,11 @@ class SQLAssembler:
         return None
 
     def _process_dynamic_growth_template(
-        self, template: str, analysis: QueryAnalysis, context: ContextInfo, original_query: str
+        self,
+        template: str,
+        analysis: QueryAnalysis,
+        context: ContextInfo,
+        original_query: str,
     ) -> Optional[str]:
         """
         Process dynamic growth templates by resolving table and column information dynamically.
@@ -2169,12 +2183,14 @@ class SQLAssembler:
             dimension_table = analysis.dimension_table
             join_key = analysis.join_key
             name_column = analysis.name_column
-            
-            logger.info(f"Dynamic growth template - Main table: {main_table}, Dimension table: {dimension_table}")
-            
+
+            logger.info(
+                f"Dynamic growth template - Main table: {main_table}, Dimension table: {dimension_table}"
+            )
+
             # Build join clause dynamically
             join_clause = f"JOIN {dimension_table} d ON f.{join_key} = d.{join_key}"
-            
+
             # Get energy column from schema linker or use default
             energy_column = "EnergyMet"  # Default
             if hasattr(context, "schema_linker") and context.schema_linker:
@@ -2182,34 +2198,34 @@ class SQLAssembler:
                     context.schema_linker.get_best_column_match(
                         user_query=original_query,
                         table_name=main_table,
-                        query_type="energy"
+                        query_type="energy",
                     )
                     or "EnergyMet"
                 )
-            
+
             # Build where clause
             where_clause = self._build_where_clause_from_entities(
                 analysis, context.user_mappings
             )
-            
+
             # Strip "WHERE" prefix if present (template expects just conditions)
             if where_clause.startswith("WHERE "):
                 where_clause = where_clause[6:]  # Remove "WHERE "
-            
+
             # Build previous where clause for growth comparison
             previous_where_clause = self._build_previous_period_where_clause(
                 analysis, context.user_mappings
             )
-            
+
             # Strip "WHERE" prefix if present
             if previous_where_clause.startswith("WHERE "):
                 previous_where_clause = previous_where_clause[6:]  # Remove "WHERE "
-            
+
             # Generate column aliases
             current_alias, previous_alias = self._generate_growth_column_aliases(
                 energy_column, "monthly"  # Default to monthly for now
             )
-            
+
             # Format the template with dynamic values
             sql = template.format(
                 main_table=main_table,
@@ -2219,12 +2235,14 @@ class SQLAssembler:
                 where_clause=where_clause,
                 previous_where_clause=previous_where_clause,
                 current_alias=current_alias,
-                previous_alias=previous_alias
+                previous_alias=previous_alias,
             )
-            
-            logger.info(f"Generated dynamic growth SQL with table: {main_table}, column: {energy_column}")
+
+            logger.info(
+                f"Generated dynamic growth SQL with table: {main_table}, column: {energy_column}"
+            )
             return sql
-            
+
         except Exception as e:
             logger.error(f"Error processing dynamic growth template: {str(e)}")
             return None
@@ -2236,14 +2254,14 @@ class SQLAssembler:
         Build WHERE clause for the previous period in growth queries.
         """
         conditions = []
-        
+
         # Add entity conditions (same as current period)
         for mapping in user_mappings:
             table_name = mapping.entity.table
             column_name = self._get_name_column(table_name)
             value = mapping.entity.name
             conditions.append(f"{table_name}.{column_name} = '{value}'")
-        
+
         # Add time period conditions for previous period
         if analysis.time_period:
             time_period = analysis.time_period
@@ -2252,10 +2270,10 @@ class SQLAssembler:
                 if year:
                     # Use same year for monthly growth (previous month within same year)
                     conditions.append(f"dt.Year = {year}")
-        
+
         if conditions:
             return f"WHERE {' AND '.join(conditions)}"
-        
+
         return ""
 
     def _add_source_filtering(self, where_clause: str, generation_source: str) -> str:
