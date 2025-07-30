@@ -1177,7 +1177,7 @@ class SQLAssembler:
                 return sql
 
             # Special handling for dynamic growth queries - they need dynamic table and column resolution
-            if template_key.endswith("_dynamic_growth_query"):
+            if template_key and template_key.endswith("_dynamic_growth_query"):
                 sql = self._process_dynamic_growth_template(
                     template, analysis, context, original_query
                 )
