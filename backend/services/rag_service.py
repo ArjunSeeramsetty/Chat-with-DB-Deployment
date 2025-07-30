@@ -853,7 +853,7 @@ SQL Query:
     def _generate_visualization(
         self, data: List[Dict[str, Any]], query: str
     ) -> Optional[VisualizationRecommendation]:
-        """Generate visualization recommendation"""
+        """Generate visualization recommendation using AI analysis"""
         try:
             if not data:
                 return None
@@ -872,6 +872,160 @@ SQL Query:
             )
             logger.info(f"🔍 VISUALIZATION DEBUG - Query: {query}")
 
+            # Use AI-powered chart recommendation
+            ai_recommendation = self._analyze_data_and_suggest_visualization(headers, data, query)
+            if ai_recommendation:
+                logger.info(f"AI chart recommendation: {ai_recommendation}")
+                return ai_recommendation
+
+            # Fallback to rule-based logic if AI fails
+            return self._generate_fallback_visualization(headers, data, query)
+
+        except Exception as e:
+            logger.warning(f"Visualization generation failed: {str(e)}")
+            return self._generate_fallback_visualization(headers, data, query)
+
+    def _analyze_data_and_suggest_visualization(self, headers: List[str], data: List[Dict[str, Any]], query: str) -> Optional[VisualizationRecommendation]:
+        """Use AI agent to analyze data and suggest optimal visualization"""
+        try:
+            # Prepare data summary for the agent
+            data_summary = self._prepare_data_summary(headers, data)
+
+            # Create a more detailed and structured prompt for the AI
+            prompt = f"""You are an expert data visualization analyst. Your task is to analyze the provided query and data summary to recommend the best possible chart configuration.
+
+QUERY: "{query}"
+
+DATA SUMMARY:
+{data_summary}
+
+Analyze the data and determine the best visualization by following these steps:
+1. **Identify Data Type**: Is this a time-series, a categorical comparison, a distribution, or a mix?
+2. **Select Chart Type**: Based on the data type, choose the most appropriate chart from this list: `dualAxisBarLine`, `dualAxisLine`, `multiLine`, `line`, `bar`, `pie`.
+3. **Assign Axes**:
+   * Identify the best column for the X-axis (usually a date or a category).
+   * Identify the primary numerical column for the Y-axis.
+4. **Check for Dual-Axis Potential**:
+   * Look at the 'Column Analysis' in the summary. Are there two numerical columns with vastly different scales (e.g., one in thousands and one in percentages)?
+   * If yes, choose `dualAxisBarLine` or `dualAxisLine`. Assign the column with larger values to `yAxis` and the column with smaller values (like growth/percentage) to `yAxisSecondary`.
+5. **Check for Grouping Potential**: Is there a second categorical column that can be used to group the data (e.g., 'SourceName')? If so, assign it to `groupBy`. This is essential for `multiLine` and `groupedBar` charts.
+
+Provide your final recommendation in this exact JSON format. Do not include any other text or explanations.
+
+{{
+    "chartType": "your_chosen_chart_type",
+    "options": {{
+        "title": "A concise and descriptive title for the chart",
+        "xAxis": "the_best_column_for_the_x_axis",
+        "yAxis": ["the_primary_numerical_column_for_the_y_axis"],
+        "yAxisSecondary": "the_secondary_numerical_column_or_null",
+        "groupBy": "the_column_for_grouping_or_null",
+        "description": "A brief explanation of what the chart shows."
+    }}
+}}
+"""
+
+            # Get AI recommendation
+            response = self.llm_provider.generate_text(prompt)
+            
+            # Parse JSON response
+            import json
+            try:
+                recommendation = json.loads(response.strip())
+                
+                # Validate the recommendation structure
+                if not isinstance(recommendation, dict):
+                    return None
+                
+                chart_type = recommendation.get("chartType")
+                options = recommendation.get("options", {})
+                
+                if not chart_type or not options:
+                    return None
+                
+                # Create visualization recommendation
+                return VisualizationRecommendation(
+                    chart_type=chart_type,
+                    config=options,
+                    confidence=0.9,
+                    reasoning="AI-powered chart recommendation"
+                )
+                
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse AI response as JSON: {response}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error in AI visualization analysis: {e}")
+            return None
+
+    def _prepare_data_summary(self, headers: List[str], data: List[Dict[str, Any]]) -> str:
+        """Prepare a comprehensive data summary for AI analysis"""
+        if not data:
+            return "No data available"
+        
+        # Analyze data characteristics
+        num_rows = len(data)
+        num_cols = len(headers)
+        
+        # Identify column types
+        numeric_columns = []
+        categorical_columns = []
+        time_columns = []
+        
+        for header in headers:
+            header_lower = header.lower()
+            
+            # Check for time-related columns
+            if any(time_word in header_lower for time_word in ["date", "month", "year", "time", "day", "quarter"]):
+                time_columns.append(header)
+            # Check for numeric columns
+            elif any(num_word in header_lower for num_word in ["value", "amount", "total", "sum", "count", "percentage", "growth", "current", "previous", "generation", "consumption"]):
+                numeric_columns.append(header)
+            else:
+                categorical_columns.append(header)
+        
+        # Analyze data ranges for dual-axis detection
+        column_analysis = []
+        for col in numeric_columns:
+            values = [row.get(col, 0) for row in data if row.get(col) is not None]
+            if values:
+                min_val = min(values)
+                max_val = max(values)
+                avg_val = sum(values) / len(values)
+                column_analysis.append(f"  - {col}: min={min_val}, max={max_val}, avg={avg_val:.2f}")
+        
+        # Check for growth/percentage patterns
+        growth_columns = [col for col in numeric_columns if any(word in col.lower() for word in ["growth", "percentage", "ratio", "rate"])]
+        total_columns = [col for col in numeric_columns if not any(word in col.lower() for word in ["growth", "percentage", "ratio", "rate"])]
+        
+        summary = f"""
+Data Summary:
+- Rows: {num_rows}
+- Columns: {num_cols}
+- Headers: {headers}
+
+Column Analysis:
+- Time columns: {time_columns}
+- Numeric columns: {numeric_columns}
+- Categorical columns: {categorical_columns}
+
+Column Details:
+{chr(10).join(column_analysis)}
+
+Dual-Axis Analysis:
+- Growth/Percentage columns: {growth_columns}
+- Total/Value columns: {total_columns}
+- Potential dual-axis: {'Yes' if growth_columns and total_columns else 'No'}
+
+Sample Data (first 3 rows):
+{chr(10).join([str(row) for row in data[:3]])}
+"""
+        return summary
+
+    def _generate_fallback_visualization(self, headers: List[str], data: List[Dict[str, Any]], query: str) -> Optional[VisualizationRecommendation]:
+        """Fallback rule-based visualization when AI fails"""
+        try:
             # Identify numeric and non-numeric columns
             numeric_columns = []
             non_numeric_columns = []
@@ -879,51 +1033,18 @@ SQL Query:
             for header in headers:
                 # Check if column is likely numeric
                 numeric_keywords = [
-                    "value",
-                    "amount",
-                    "total",
-                    "sum",
-                    "count",
-                    "percentage",
-                    "growth",
-                    "current",
-                    "previous",
-                    "generation",
-                    "consumption",
-                    "shortage",
-                    "met",
-                    "maximum",
-                    "minimum",
-                    "average",
-                    "avg",
-                    "max",
-                    "min",
+                    "value", "amount", "total", "sum", "count", "percentage", "growth",
+                    "current", "previous", "generation", "consumption", "shortage", "met",
+                    "maximum", "minimum", "average", "avg", "max", "min"
                 ]
                 non_numeric_keywords = [
-                    "name",
-                    "region",
-                    "state",
-                    "source",
-                    "trend",
-                    "month",
-                    "year",
-                    "quarter",
-                    "week",
-                    "day",
-                    "id",
-                    "type",
-                    "category",
-                    "description",
-                    "status",
+                    "name", "region", "state", "source", "trend", "month", "year", "quarter",
+                    "week", "day", "id", "type", "category", "description", "status"
                 ]
 
                 header_lower = header.lower()
-                has_numeric_keyword = any(
-                    keyword in header_lower for keyword in numeric_keywords
-                )
-                has_non_numeric_keyword = any(
-                    keyword in header_lower for keyword in non_numeric_keywords
-                )
+                has_numeric_keyword = any(keyword in header_lower for keyword in numeric_keywords)
+                has_non_numeric_keyword = any(keyword in header_lower for keyword in non_numeric_keywords)
 
                 if has_numeric_keyword or not has_non_numeric_keyword:
                     numeric_columns.append(header)
@@ -945,30 +1066,16 @@ SQL Query:
                 primary_y_axis = numeric_columns
             elif len(numeric_columns) > 2:
                 # Multiple numeric columns - distribute intelligently
-                # For growth queries, put generation values on primary, percentages on secondary
                 for col in numeric_columns:
                     col_lower = col.lower()
                     # Check if it's specifically a growth percentage column
-                    if any(
-                        keyword in col_lower
-                        for keyword in [
-                            "growthpercentage",
-                            "growth_percentage",
-                            "percentage",
-                        ]
-                    ):
+                    if any(keyword in col_lower for keyword in ["growthpercentage", "growth_percentage", "percentage"]):
                         secondary_y_axis.append(col)
                     # Check if it's a generation value (current or previous)
-                    elif any(
-                        keyword in col_lower
-                        for keyword in ["generation", "current", "previous"]
-                    ):
+                    elif any(keyword in col_lower for keyword in ["generation", "current", "previous"]):
                         primary_y_axis.append(col)
                     # For other cases, use the general logic
-                    elif any(
-                        keyword in col_lower
-                        for keyword in ["percentage", "growth", "ratio", "rate"]
-                    ):
+                    elif any(keyword in col_lower for keyword in ["percentage", "growth", "ratio", "rate"]):
                         secondary_y_axis.append(col)
                     else:
                         primary_y_axis.append(col)
@@ -981,16 +1088,11 @@ SQL Query:
             has_month_column = any("month" in header.lower() for header in headers)
             has_state_column = any("state" in header.lower() for header in headers)
             has_region_column = any("region" in header.lower() for header in headers)
-            is_monthly_multi_state = has_month_column and (
-                has_state_column or has_region_column
-            )
+            is_monthly_multi_state = has_month_column and (has_state_column or has_region_column)
 
             # Check for growth data (has current/previous/growth columns)
             has_growth_data = any(
-                any(
-                    growth_word in header.lower()
-                    for growth_word in ["growth", "current", "previous", "percentage"]
-                )
+                any(growth_word in header.lower() for growth_word in ["growth", "current", "previous", "percentage"])
                 for header in headers
             )
 
@@ -1000,19 +1102,7 @@ SQL Query:
                 group_by_column = None
                 for header in headers:
                     header_lower = header.lower()
-                    if not any(
-                        num_word in header_lower
-                        for num_word in [
-                            "month",
-                            "growth",
-                            "current",
-                            "previous",
-                            "percentage",
-                        ]
-                    ) and not any(
-                        numeric_word in header_lower
-                        for numeric_word in numeric_keywords
-                    ):
+                    if not any(num_word in header_lower for num_word in ["month", "growth", "current", "previous", "percentage"]) and not any(numeric_word in header_lower for numeric_word in numeric_keywords):
                         group_by_column = header
                         break
 
@@ -1027,11 +1117,7 @@ SQL Query:
                     "yAxisSecondary": secondary_y_axis,
                     "groupBy": group_by_column,
                     "description": "Multi-line chart showing monthly trends",
-                    "dataType": (
-                        "monthly_time_series"
-                        if is_monthly_multi_state
-                        else "growth_time_series"
-                    ),
+                    "dataType": "monthly_time_series" if is_monthly_multi_state else "growth_time_series",
                 }
                 logger.info(f"Generated multi-line chart config: {config}")
                 return VisualizationRecommendation(
@@ -1097,18 +1183,7 @@ SQL Query:
                 # Many rows - use line chart for trends, but only if it's time series data
                 # Check all headers for time-related words, not just the first one
                 is_time_series = any(
-                    any(
-                        time_word in header.lower()
-                        for time_word in [
-                            "date",
-                            "month",
-                            "year",
-                            "time",
-                            "day",
-                            "quarter",
-                            "block",
-                        ]
-                    )
+                    any(time_word in header.lower() for time_word in ["date", "month", "year", "time", "day", "quarter", "block"])
                     for header in headers
                 )
 
@@ -1146,7 +1221,7 @@ SQL Query:
             return None
 
         except Exception as e:
-            logger.warning(f"Visualization generation failed: {str(e)}")
+            logger.warning(f"Fallback visualization generation failed: {str(e)}")
             return None
 
     def _generate_suggestions(
