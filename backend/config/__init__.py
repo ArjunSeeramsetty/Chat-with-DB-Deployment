@@ -2,6 +2,7 @@
 Configuration module for Chat-with-DB system
 """
 
+# Import semantic config only to avoid circular imports
 from .semantic_config import (
     SemanticEngineSettings,
     EnhancedSystemConfig,
