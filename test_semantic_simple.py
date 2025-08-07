@@ -33,7 +33,7 @@ def test_imports():
     
     try:
         # Test configuration imports
-        from backend.config.semantic_config import (
+        from backend.semantic.semantic_config import (
             SemanticEngineSettings,
             EnhancedSystemConfig,
             get_semantic_config,
@@ -66,7 +66,7 @@ def test_configuration():
     print("-" * 50)
     
     try:
-        from backend.config.semantic_config import (
+        from backend.semantic.semantic_config import (
             get_semantic_config, 
             validate_semantic_config,
             SemanticProcessingMode,

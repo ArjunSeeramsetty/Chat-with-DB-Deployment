@@ -15,7 +15,7 @@ from backend.core.semantic_processor import SemanticQueryProcessor, EnhancedQuer
 from backend.core.llm_provider import create_llm_provider, LLMProvider
 from backend.core.assembler import SQLAssembler
 from backend.core.schema_linker import SchemaLinker
-from backend.core.validator import QueryValidator
+from backend.core.validator import EnhancedSQLValidator
 from backend.core.intent import IntentAnalyzer
 from backend.core.executor import AsyncSQLExecutor
 from backend.core.types import (
@@ -64,13 +64,21 @@ class EnhancedRAGService:
         if llm_provider:
             self.llm_provider = llm_provider
         else:
-            self.llm_provider = create_llm_provider()
+            self.llm_provider = create_llm_provider(
+                provider_type=self.settings.llm_provider_type,
+                api_key=self.settings.llm_api_key,
+                model=self.settings.llm_model,
+                base_url=self.settings.llm_base_url,
+                enable_gpu=getattr(self.settings, 'enable_gpu_acceleration', False)
+            )
             
         # Initialize core components
-        self.schema_linker = SchemaLinker(db_path)
-        self.intent_analyzer = IntentAnalyzer(self.llm_provider)
+        # Get schema info for SchemaLinker
+        schema_info = self._get_schema_info()
+        self.schema_linker = SchemaLinker(schema_info, db_path, self.llm_provider)
+        self.intent_analyzer = IntentAnalyzer()
         self.sql_assembler = SQLAssembler()
-        self.query_validator = QueryValidator()
+        self.query_validator = EnhancedSQLValidator()
         self.sql_executor = AsyncSQLExecutor(db_path)
         
         # Initialize semantic processor
@@ -91,10 +99,33 @@ class EnhancedRAGService:
             "user_satisfaction_scores": []
         }
         
+    def _get_schema_info(self) -> Dict[str, List[str]]:
+        """Get schema information for the database"""
+        try:
+            import sqlite3
+            schema_info = {}
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get all tables
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = [row[0] for row in cursor.fetchall()]
+                
+                for table in tables:
+                    # Get columns for each table
+                    cursor.execute(f"PRAGMA table_info({table})")
+                    columns = [row[1] for row in cursor.fetchall()]
+                    schema_info[table] = columns
+                    
+            return schema_info
+        except Exception as e:
+            logger.warning(f"Could not load schema info: {e}")
+            return {}
+        
     async def initialize(self):
         """Initialize the enhanced RAG service"""
         await self.semantic_processor.initialize()
-        await self.schema_linker.initialize()
         logger.info("Enhanced RAG service initialized successfully")
         
     async def process_query(
@@ -115,12 +146,12 @@ class EnhancedRAGService:
         start_time = time.time()
         session_id = str(uuid.uuid4())
         
-        logger.info(f"🚀 Processing enhanced query: {request.query}")
+        logger.info(f"🚀 Processing enhanced query: {request.question}")
         
         try:
             # Step 1: Enhanced semantic processing
             semantic_result = await self.semantic_processor.process_query(
-                request.query,
+                request.question,
                 self._build_semantic_context(context)
             )
             
@@ -137,7 +168,7 @@ class EnhancedRAGService:
             visualization = None
             if execution_result and execution_result.success and execution_result.data:
                 visualization = await self._generate_enhanced_visualization(
-                    execution_result.data, request.query, semantic_result.semantic_context
+                    execution_result.data, request.question, semantic_result.semantic_context
                 )
                 
             # Step 4: Create enhanced response
@@ -218,7 +249,7 @@ class EnhancedRAGService:
         
         try:
             # Validate SQL before execution
-            validation_result = await self.query_validator.validate_query(sql)
+            validation_result = self.query_validator.validate_sql(sql)
             
             if not validation_result.is_valid:
                 logger.warning(f"SQL validation failed: {validation_result.errors}")

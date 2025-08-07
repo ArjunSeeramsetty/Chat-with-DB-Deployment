@@ -21,7 +21,7 @@ from backend.core.semantic_processor import SemanticQueryProcessor, EnhancedQuer
 from backend.services.enhanced_rag_service import EnhancedRAGService
 from backend.core.llm_provider import create_llm_provider
 from backend.core.types import QueryRequest
-from backend.config.semantic_config import get_semantic_config, validate_semantic_config
+from backend.semantic.semantic_config import get_semantic_config, validate_semantic_config
 
 def print_banner():
     """Print test banner"""

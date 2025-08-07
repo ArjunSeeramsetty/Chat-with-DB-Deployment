@@ -14,7 +14,7 @@ from backend.core.types import QueryAnalysis, IntentType, QueryType
 from backend.core.llm_provider import LLMProvider
 from backend.core.assembler import SQLAssembler
 from backend.core.schema_linker import SchemaLinker
-from backend.core.validator import QueryValidator
+from backend.core.validator import EnhancedSQLValidator
 from backend.core.intent import IntentAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class SemanticQueryProcessor:
         llm_provider: LLMProvider,
         schema_linker: SchemaLinker,
         sql_assembler: SQLAssembler,
-        query_validator: QueryValidator,
+        query_validator: EnhancedSQLValidator,
         intent_analyzer: IntentAnalyzer
     ):
         self.llm_provider = llm_provider
@@ -441,7 +441,8 @@ class SemanticQueryProcessor:
         sql = sql_result["sql"]
         
         # Step 1: Syntax validation
-        syntax_valid = await self.query_validator.validate_syntax(sql)
+        validation_result = self.query_validator.validate_sql(sql)
+        syntax_valid = validation_result.is_valid
         
         # Step 2: Semantic validation
         semantic_valid = self._validate_semantic_consistency(sql, semantic_context)

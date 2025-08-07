@@ -6,7 +6,9 @@ import logging
 from functools import lru_cache
 from typing import Optional
 
-from ..config import Settings, get_settings
+import sys
+sys.path.insert(0, '.')
+from backend.config import Settings, get_settings
 from ..core.llm_provider import create_llm_provider
 from ..core.types import QueryRequest
 from ..services.rag_service import EnhancedRAGService
