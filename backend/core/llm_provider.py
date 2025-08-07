@@ -7,6 +7,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Union
+import json
 
 # Import OpenAI types
 from openai.types.chat import (
@@ -102,9 +103,72 @@ class MockLLMProvider(LLMProvider):
     async def generate(
         self, prompt: str, system_prompt: Optional[str] = None
     ) -> LLMResponse:
-        """Mock generation that returns safe, empty responses"""
-        logger.info(f"Mock LLM called with prompt: {prompt[:100]}...")
-        return LLMResponse(content="", is_safe=True, error="No LLM provider configured")
+        """Generate mock response based on prompt content"""
+        try:
+            # Analyze prompt to generate appropriate mock response
+            prompt_lower = prompt.lower()
+            
+            # Entity extraction responses
+            if "entity extraction" in prompt_lower or "extract entities" in prompt_lower:
+                mock_response = {
+                    "entities": ["energy", "shortage", "consumption"],
+                    "tables": ["FactAllIndiaDailySummary"],
+                    "relationships": ["energy_shortage", "energy_consumption"],
+                    "aggregations": ["average", "sum", "count"]
+                }
+                return LLMResponse(
+                    content=json.dumps(mock_response),
+                    is_safe=True,
+                    usage={"total_tokens": 50, "prompt_tokens": 30, "completion_tokens": 20}
+                )
+            
+            # SQL generation responses
+            elif "sql generation" in prompt_lower or "generate sql" in prompt_lower:
+                if "average" in prompt_lower and "shortage" in prompt_lower:
+                    sql = "SELECT AVG(EnergyShortage) FROM FactAllIndiaDailySummary"
+                elif "total" in prompt_lower and "consumption" in prompt_lower:
+                    sql = "SELECT SUM(EnergyMet) FROM FactAllIndiaDailySummary"
+                elif "compare" in prompt_lower:
+                    sql = "SELECT Region, AVG(EnergyShortage) as avg_shortage, AVG(EnergyMet) as avg_consumption FROM FactAllIndiaDailySummary GROUP BY Region"
+                else:
+                    sql = "SELECT * FROM FactAllIndiaDailySummary LIMIT 10"
+                
+                return LLMResponse(
+                    content=sql,
+                    is_safe=True,
+                    usage={"total_tokens": 100, "prompt_tokens": 80, "completion_tokens": 20}
+                )
+            
+            # Complexity analysis responses
+            elif "complexity" in prompt_lower or "analyze" in prompt_lower:
+                if "average" in prompt_lower or "total" in prompt_lower:
+                    complexity = "MODERATE"
+                elif "compare" in prompt_lower or "vs" in prompt_lower:
+                    complexity = "COMPLEX"
+                else:
+                    complexity = "SIMPLE"
+                
+                return LLMResponse(
+                    content=f'{{"complexity": "{complexity}", "score": 2}}',
+                    is_safe=True,
+                    usage={"total_tokens": 30, "prompt_tokens": 20, "completion_tokens": 10}
+                )
+            
+            # Default response
+            else:
+                return LLMResponse(
+                    content="Mock response for testing purposes",
+                    is_safe=True,
+                    usage={"total_tokens": 20, "prompt_tokens": 15, "completion_tokens": 5}
+                )
+                
+        except Exception as e:
+            logger.error(f"Mock LLM error: {str(e)}")
+            return LLMResponse(
+                content="",
+                is_safe=False,
+                error=f"Mock error: {str(e)}"
+            )
 
 
 class OpenAIProvider(LLMProvider):
@@ -212,7 +276,7 @@ class OllamaProvider(LLMProvider):
     async def generate(
         self, prompt: str, system_prompt: Optional[str] = None
     ) -> LLMResponse:
-        """Generate response using Ollama API with optional GPU acceleration"""
+        """Generate response using Ollama API with optional GPU acceleration and robust error handling"""
         try:
             # Prepare the full prompt
             full_prompt = prompt
@@ -250,19 +314,44 @@ class OllamaProvider(LLMProvider):
             else:
                 self.gpu_used = False
 
-            # Make request to Ollama API
-            response = await self.client.post(
-                f"{self.base_url}/api/generate", json=request_data, timeout=30.0
-            )
-
-            if response.status_code != 200:
-                logger.error(
-                    f"Ollama API error: {response.status_code} - {response.text}"
-                )
+            # Try multiple API endpoints for compatibility
+            endpoints_to_try = [
+                f"{self.base_url}/api/generate",
+                f"{self.base_url}/api/completions"
+            ]
+            
+            response = None
+            last_error = None
+            
+            for endpoint in endpoints_to_try:
+                try:
+                    logger.debug(f"Trying Ollama endpoint: {endpoint}")
+                    response = await self.client.post(
+                        endpoint, json=request_data, timeout=30.0
+                    )
+                    
+                    if response.status_code == 200:
+                        break
+                    elif response.status_code == 404:
+                        logger.debug(f"Endpoint {endpoint} returned 404, trying next...")
+                        continue
+                    else:
+                        logger.warning(f"Endpoint {endpoint} returned {response.status_code}")
+                        last_error = f"API error: {response.status_code} - {response.text}"
+                        continue
+                        
+                except Exception as e:
+                    logger.debug(f"Failed to connect to {endpoint}: {str(e)}")
+                    last_error = str(e)
+                    continue
+            
+            if response is None or response.status_code != 200:
+                error_msg = last_error or "All endpoints failed"
+                logger.error(f"Ollama API error: {error_msg}")
                 return LLMResponse(
                     content="",
                     is_safe=False,
-                    error=f"API error: {response.status_code}",
+                    error=f"API error: {error_msg}",
                 )
 
             response_data = response.json()

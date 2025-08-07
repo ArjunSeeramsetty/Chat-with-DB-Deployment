@@ -108,6 +108,68 @@ async def get_available_models():
         raise HTTPException(status_code=500, detail="Failed to get available models")
 
 
+@router.get("/api/v1/llm/health")
+async def llm_health_check():
+    """LLM health check endpoint"""
+    try:
+        settings = get_settings_dep()
+        llm_provider = get_llm_provider()
+        
+        # Test LLM connectivity with a simple prompt
+        test_prompt = "Respond with 'OK' if you can read this message."
+        
+        try:
+            response = await llm_provider.generate(test_prompt)
+            
+            if response.error:
+                return {
+                    "status": "unhealthy",
+                    "provider": type(llm_provider).__name__,
+                    "error": response.error,
+                    "timestamp": time.time(),
+                    "connectivity": "failed"
+                }
+            
+            if not response.content or len(response.content.strip()) == 0:
+                return {
+                    "status": "unhealthy",
+                    "provider": type(llm_provider).__name__,
+                    "error": "Empty response from LLM",
+                    "timestamp": time.time(),
+                    "connectivity": "failed"
+                }
+            
+            return {
+                "status": "healthy",
+                "provider": type(llm_provider).__name__,
+                "model": getattr(llm_provider, 'model', 'unknown'),
+                "base_url": getattr(llm_provider, 'base_url', 'unknown'),
+                "timestamp": time.time(),
+                "connectivity": "success",
+                "response_length": len(response.content)
+            }
+            
+        except Exception as e:
+            logger.error(f"LLM health check failed: {str(e)}")
+            return {
+                "status": "unhealthy",
+                "provider": type(llm_provider).__name__,
+                "error": str(e),
+                "timestamp": time.time(),
+                "connectivity": "failed"
+            }
+            
+    except Exception as e:
+        logger.error(f"LLM health check failed: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "provider": "unknown",
+            "error": str(e),
+            "timestamp": time.time(),
+            "connectivity": "failed"
+        }
+
+
 @router.get("/api/v1/llm/gpu-status")
 async def get_gpu_status():
     """Get GPU acceleration status"""

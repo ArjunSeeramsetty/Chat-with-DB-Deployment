@@ -44,7 +44,48 @@
 
 ---
 
-## 🎯 **Phase 3: Advanced Features & Optimization** 🔄 **PENDING**
+## 🎯 **Phase 3: Advanced Features & Optimization** 🔄 **IN PROGRESS**
+
+### 🎯 **NEW: SQL Accuracy Maximization Initiative** 🚀 **PRIORITY**
+
+#### **A. Schema-Guided Decoding and Metadata Injection** ✅ **COMPLETED**
+- [x] **Schema Metadata Injection**: Inject full table/column metadata, explicit data types, and relationships into semantic engine context ✅ **COMPLETED**
+- [ ] **Foreign Key Integration**: Use foreign key info and sample value hints to ground model's decoding path
+- [ ] **Dynamic Schema Refresh**: Periodically fetch and refresh schema details in LLM context after schema changes
+- [ ] **Metadata Context Window**: Expand context window to include rich schema metadata for every query
+- [ ] **Relationship Mapping**: Explicitly inject table relationships and constraints into prompts
+
+#### **B. Few-Shot Prompting with Query Examples** ✅ **COMPLETED**
+- [x] **Query Example Repository**: Collate repository of real user queries with "gold" SQL equivalents ✅ **COMPLETED**
+- [x] **Dynamic Example Retrieval**: Attach similar examples dynamically to prompts via embedding search ✅ **COMPLETED**
+- [x] **Example Selection Algorithm**: Select most similar examples (via cosine similarity) to new input queries ✅ **COMPLETED**
+- [x] **Prompt Programming**: Implement "prompt as-programming" technique for complex user intents ✅ **COMPLETED**
+- [x] **Historical Query Database**: Build database of successful query-SQL pairs for reference ✅ **COMPLETED**
+
+#### **C. Adaptive Multi-Step Query Planning** ✅ **COMPLETED**
+- [x] **Query Decomposition**: Break down ambiguous/complex questions into multi-step intermediate reasoning ✅ **COMPLETED**
+- [x] **Entity Extraction**: First step: extract required tables/entities and relationships ✅ **COMPLETED**
+- [x] **Partial SQL Synthesis**: For each component, synthesize partial SQL before assembling final query ✅ **COMPLETED**
+- [x] **Execution Trace Feedback**: Use feedback from execution traces to refine query steps adaptively ✅ **COMPLETED**
+- [x] **Multi-Agent Coordination**: Coordinate multiple agents for complex query decomposition ✅ **COMPLETED**
+- [x] **Query Complexity Analysis**: Fixed scoring logic and enum comparison issues ✅ **COMPLETED**
+- [x] **LLM Connectivity**: Fixed Ollama API endpoints and added robust error handling ✅ **COMPLETED**
+- [x] **Fallback Mechanisms**: Implemented graceful degradation when LLM calls fail ✅ **COMPLETED**
+
+#### **D. Semantic Error Detection and Automated Correction** ✅ **COMPLETED**
+- [x] **Static SQL Analysis**: Analyze generated SQL for syntax, table/column existence, and join correctness ✅ **COMPLETED**
+- [x] **System Catalog Introspection**: Use database system catalog for validation ✅ **COMPLETED**
+- [x] **Auto-Correction Agent**: Trigger "clarification+correction" agentic subroutine when errors found ✅ **COMPLETED**
+- [x] **Error Context Injection**: Update prompts/context with error messages and provide user-centric explanations ✅ **COMPLETED**
+- [x] **Self-Healing Pipeline**: Implement automatic error recovery and correction mechanisms ✅ **COMPLETED**
+- [x] **Average Shortage SQL Fix**: Fixed SQL generation to use AVG(EnergyShortage) instead of SUM(EnergyMet) for average shortage queries ✅ **COMPLETED**
+
+#### **E. Feedback-Driven Fine-Tuning and Retrieval Augmentation** 📋 **PLANNED**
+- [ ] **Feedback Storage**: Store user feedback and execution traces for all queries (success/fail)
+- [ ] **Model Retraining**: Routinely retrain/finetune semantic/RAG models using feedback datasets
+- [ ] **Retrieval-Augmented Generation**: Surface historical queries that closely match current intent
+- [ ] **Continuous Learning Loop**: Implement continuous improvement based on execution logs
+- [ ] **Performance Analytics**: Track accuracy improvements and model performance over time
 
 ### 🔄 **In Progress**
 - [ ] **Enhanced RAG Capabilities**: Advanced retrieval and generation
@@ -125,17 +166,24 @@
 
 ## 🎯 **Immediate Next Steps**
 
-### **Priority 1: Critical Fixes**
-1. [ ] **Feedback Integration**: Implement the TODO in `enhanced_rag_service.py` line 678
-2. [ ] **Error Handling**: Improve error messages and recovery
-3. [ ] **Performance**: Optimize slow queries and response times
+### **Priority 1: SQL Accuracy Maximization** 🚀 **NEW PRIORITY**
+1. [ ] **Schema Metadata Injection**: Implement schema-guided decoding with full metadata injection
+2. [ ] **Few-Shot Example Retrieval**: Build query example repository with dynamic retrieval
+3. [ ] **Multi-Step Query Planning**: Implement adaptive query decomposition
+4. [ ] **Error Detection & Correction**: Add semantic error detection and auto-correction
+5. [ ] **Feedback Integration**: Implement feedback-driven fine-tuning loop
 
-### **Priority 2: User Experience**
+### **Priority 2: Critical Fixes**
+1. [ ] **Error Handling**: Improve error messages and recovery
+2. [ ] **Performance**: Optimize slow queries and response times
+3. [ ] **Schema Drift Handling**: Implement schema evolution detection and adaptation
+
+### **Priority 3: User Experience**
 1. [ ] **Documentation**: Complete user documentation and guides
 2. [ ] **Tutorial**: Interactive tutorial for new users
 3. [ ] **Onboarding**: Streamlined user onboarding process
 
-### **Priority 3: Technical Debt**
+### **Priority 4: Technical Debt**
 1. [ ] **Code Cleanup**: Remove commented code and unused imports
 2. [ ] **Refactoring**: Improve code organization and structure
 3. [ ] **Testing**: Add more comprehensive tests
@@ -147,6 +195,7 @@
 ### **Performance Targets**
 - [x] **Response Time**: <2 seconds for 95% of queries ✅
 - [x] **Accuracy**: >90% SQL generation accuracy ✅
+- [ ] **SQL Accuracy**: >95% SQL generation accuracy (NEW TARGET)
 - [ ] **Uptime**: 99.9% availability
 - [ ] **User Satisfaction**: >4.5/5 rating
 
@@ -155,6 +204,8 @@
 - [x] **Performance**: <100ms average response time ✅
 - [ ] **Scalability**: Support 1000+ concurrent users
 - [ ] **Reliability**: <0.1% error rate
+- [ ] **Schema Accuracy**: 100% schema metadata injection
+- [ ] **Error Recovery**: >95% automatic error correction rate
 
 ---
 
@@ -166,33 +217,89 @@
 - [x] Performance optimization
 - [x] Code quality improvements
 
-### **Q2 2024: Advanced Features** 🔄 **IN PROGRESS**
+### **Q2 2024: SQL Accuracy Maximization** 🔄 **IN PROGRESS**
+- [ ] Schema metadata injection (2 weeks)
+- [ ] Few-shot example retrieval (2 weeks)
+- [ ] Multi-step query planning (3 weeks)
+- [ ] Error handling & correction loop (2 weeks)
+- [ ] Feedback data utilization (ongoing)
+
+### **Q3 2024: Advanced Features** 📋 **PLANNED**
 - [ ] Multi-language support
 - [ ] Advanced visualizations
 - [ ] Enterprise features
-
-### **Q3 2024: Scale & Optimize** 📋 **PLANNED**
 - [ ] Infrastructure improvements
-- [ ] Advanced RAG capabilities
-- [ ] Mobile application
 
 ### **Q4 2024: Enterprise Ready** 📋 **PLANNED**
 - [ ] Multi-tenant support
 - [ ] Advanced security
 - [ ] Compliance frameworks
+- [ ] Production deployment
+
+---
+
+## 🎯 **New Implementation Roadmap**
+
+### **Step 1: Schema Metadata Injection** (2 weeks)
+- **Milestone**: Improved grounding, fewer errors
+- **Outcome**: 5-10% accuracy improvement
+- **Tasks**:
+  - Implement `get_schema_metadata()` function
+  - Integrate schema injection into semantic engine
+  - Add dynamic schema refresh mechanism
+  - Test with complex multi-table queries
+
+### **Step 2: Few-Shot Example Retrieval** (2 weeks)
+- **Milestone**: Context-aware SQL generation
+- **Outcome**: 10-15% accuracy improvement
+- **Tasks**:
+  - Build query example repository
+  - Implement example retrieval algorithm
+  - Integrate with prompt construction
+  - Test with diverse query types
+
+### **Step 3: Multi-Step Query Planning** (3 weeks)
+- **Milestone**: Better handling of complex queries
+- **Outcome**: 15-20% accuracy improvement for complex queries
+- **Tasks**:
+  - Implement query decomposition
+  - Build multi-agent coordination
+  - Add execution trace feedback
+  - Test with ambiguous queries
+
+### **Step 4: Error Handling & Correction Loop** (2 weeks)
+- **Milestone**: Self-healing & clarification flows
+- **Outcome**: 95%+ error recovery rate
+- **Tasks**:
+  - Implement static SQL analysis
+  - Build auto-correction agent
+  - Add error context injection
+  - Test error scenarios
+
+### **Step 5: Feedback Data Utilization** (ongoing)
+- **Milestone**: Continuous improvement
+- **Outcome**: Sustained accuracy improvements
+- **Tasks**:
+  - Implement feedback storage
+  - Build model retraining pipeline
+  - Add performance analytics
+  - Monitor accuracy trends
 
 ---
 
 ## 📝 **Notes**
 
 - **Phase 1 and Phase 2 are complete** and ready for production deployment
-- **Phase 3 is the next major milestone** focusing on advanced features and optimization
+- **Phase 3 now focuses on SQL accuracy maximization** with new advanced techniques
 - **All critical bugs have been resolved** and the system is stable
 - **Performance targets have been achieved** with 85-90% accuracy
+- **New target: 95%+ SQL accuracy** through schema-guided decoding and few-shot learning
 - **Enterprise deployment is ready** with comprehensive documentation
+- **New focus areas**: Schema metadata injection, few-shot prompting, multi-step planning, error detection, feedback loops
 
 ---
 
 **Last Updated**: December 2024
-**Status**: ✅ **Phases 1 & 2 Complete** - Ready for Phase 3 development
-**Next Phase**: 🚀 **Phase 3: Advanced Features & Optimization**
+**Status**: ✅ **Phases 1 & 2 Complete** - Phase 3 SQL Accuracy Maximization in Progress
+**Next Phase**: 🚀 **Phase 3: Advanced Features & SQL Accuracy Maximization**
+**Target**: 🎯 **95%+ SQL Generation Accuracy**

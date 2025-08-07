@@ -41,7 +41,7 @@ class EnhancedRAGService:
         )
         
         # Initialize semantic components
-        self.semantic_engine = SemanticEngine(self.llm_provider)
+        self.semantic_engine = SemanticEngine(self.llm_provider, db_path)
         self.wren_ai_integration = WrenAIIntegration(self.llm_provider)
         
         # Initialize core components

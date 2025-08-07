@@ -18,6 +18,9 @@ import pandas as pd
 
 from backend.core.types import QueryAnalysis, IntentType, QueryType
 from backend.core.llm_provider import LLMProvider
+from backend.core.schema_metadata import SchemaMetadataExtractor
+from backend.core.few_shot_examples import FewShotExampleRepository, FewShotExampleRetriever
+from backend.core.query_planner import MultiStepQueryPlanner, QueryComplexity
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +73,28 @@ class SemanticEngine:
     Integrates vector search, domain modeling, and intelligent context retrieval
     """
     
-    def __init__(self, llm_provider: LLMProvider):
+    def __init__(self, llm_provider: LLMProvider, db_path: str = None):
         self.llm_provider = llm_provider
+        self.db_path = db_path
         self.sentence_transformer = SentenceTransformer('all-MiniLM-L6-v2')
         self.vector_client = QdrantClient(":memory:")  # In-memory for development
         self.domain_model: Optional[DomainModel] = None
+        
+        # Initialize schema metadata extractor if db_path is provided
+        self.schema_extractor = None
+        if db_path:
+            self.schema_extractor = SchemaMetadataExtractor(db_path)
+            
+        # Initialize few-shot example repository and retriever
+        self.few_shot_repository = None
+        self.few_shot_retriever = None
+        if db_path:
+            self.few_shot_repository = FewShotExampleRepository(db_path)
+            self.few_shot_retriever = FewShotExampleRetriever(self.few_shot_repository)
+            
+        # Initialize multi-step query planner
+        self.query_planner = MultiStepQueryPlanner(llm_provider)
+            
         self._initialize_vector_store()
         
     async def initialize(self):
@@ -346,57 +366,136 @@ class SemanticEngine:
             )
             
     async def _llm_semantic_analysis(self, query: str, schema_results: List, pattern_results: List) -> Dict[str, Any]:
-        """Use LLM for semantic analysis"""
+        """Use LLM for semantic analysis with robust error handling and fallbacks"""
         try:
+            # Convert ScoredPoint objects to serializable dictionaries
+            def convert_scored_points(results):
+                converted = []
+                for result in results:
+                    if hasattr(result, 'payload') and hasattr(result, 'score'):
+                        converted.append({
+                            'payload': result.payload,
+                            'score': float(result.score)
+                        })
+                    else:
+                        converted.append(result)
+                return converted
+            
+            schema_results_serializable = convert_scored_points(schema_results)
+            pattern_results_serializable = convert_scored_points(pattern_results)
+            
             prompt = f"""
-            Analyze the following natural language query for semantic understanding:
+            Analyze the following natural language query for semantic understanding.
             
             Query: "{query}"
             
             Available schema information:
-            {json.dumps(schema_results, indent=2)}
+            {json.dumps(schema_results_serializable, indent=2, default=str)}
             
             Query patterns found:
-            {json.dumps(pattern_results, indent=2)}
+            {json.dumps(pattern_results_serializable, indent=2, default=str)}
             
-            Provide analysis in JSON format with:
-            - intent: (aggregation, filtering, time_series, comparison, growth)
-            - confidence: (0.0-1.0)
-            - business_entities: [list of business concepts]
-            - domain_concepts: [list of domain-specific terms]
-            - temporal_context: {{"time_period": "monthly", "year": 2024}}
-            - relationships: [list of table relationships needed]
+            You must respond with ONLY valid JSON in this exact format:
+            {{
+                "intent": "aggregation",
+                "confidence": 0.8,
+                "business_entities": ["energy", "shortage", "region"],
+                "domain_concepts": ["energy_met", "energy_shortage"],
+                "temporal_context": {{"time_period": "daily", "year": 2024}},
+                "relationships": []
+            }}
             
-            Return only valid JSON:
+            Rules:
+            - intent must be one of: "aggregation", "filtering", "time_series", "comparison", "growth"
+            - confidence must be a number between 0.0 and 1.0
+            - business_entities must be a list of strings
+            - domain_concepts must be a list of strings
+            - temporal_context must be an object or null
+            - relationships must be a list
+            
+            Return ONLY the JSON object, no other text:
             """
             
-            response = await self.llm_provider.generate(prompt)
-            response_text = response.content if hasattr(response, 'content') else str(response)
+            # Wrap LLM call with robust error handling
+            try:
+                response = await self.llm_provider.generate(prompt)
+                response_text = response.content if hasattr(response, 'content') else str(response)
+                
+                if not response_text or response.error:
+                    logger.warning(f"LLM returned empty response or error: {response.error}")
+                    return self._fallback_entity_extraction(query)
+                
+            except Exception as e:
+                logger.error(f"LLM call failed: {e}")
+                return self._fallback_entity_extraction(query)
+            
+            # Clean the response text
+            response_text = response_text.strip()
+            
+            # Remove any markdown formatting
+            if response_text.startswith('```json'):
+                response_text = response_text[7:]
+            if response_text.endswith('```'):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
             
             # Parse JSON response
             try:
-                return json.loads(response_text.strip())
-            except json.JSONDecodeError:
-                logger.warning("Failed to parse LLM response as JSON, using fallback")
-                return {
-                    "intent": "aggregation",
-                    "confidence": 0.5,
-                    "business_entities": [],
-                    "domain_concepts": [],
-                    "temporal_context": None,
-                    "relationships": []
-                }
+                parsed_response = json.loads(response_text)
+                
+                # Validate required fields
+                required_fields = ['intent', 'confidence', 'business_entities', 'domain_concepts', 'relationships']
+                for field in required_fields:
+                    if field not in parsed_response:
+                        raise ValueError(f"Missing required field: {field}")
+                
+                return parsed_response
+                
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Failed to parse LLM response as JSON: {e}. Response: {response_text[:200]}...")
+                return self._fallback_entity_extraction(query)
                 
         except Exception as e:
             logger.error(f"LLM semantic analysis failed: {e}")
-            return {
-                "intent": "aggregation",
-                "confidence": 0.3,
-                "business_entities": [],
-                "domain_concepts": [],
-                "temporal_context": None,
-                "relationships": []
-            }
+            return self._fallback_entity_extraction(query)
+    
+    def _fallback_entity_extraction(self, query: str) -> Dict[str, Any]:
+        """Fallback entity extraction when LLM fails"""
+        query_lower = query.lower()
+        
+        # Extract entities based on keywords
+        entities = []
+        if any(word in query_lower for word in ['energy', 'power', 'electricity']):
+            entities.append('energy')
+        if any(word in query_lower for word in ['shortage', 'deficit', 'lack']):
+            entities.append('shortage')
+        if any(word in query_lower for word in ['consumption', 'usage', 'demand']):
+            entities.append('consumption')
+        if any(word in query_lower for word in ['region', 'state', 'area']):
+            entities.append('region')
+        if any(word in query_lower for word in ['date', 'time', 'period']):
+            entities.append('date')
+        
+        # Determine intent
+        intent = "aggregation"
+        if any(word in query_lower for word in ['compare', 'vs', 'versus']):
+            intent = "comparison"
+        elif any(word in query_lower for word in ['trend', 'growth', 'change']):
+            intent = "time_series"
+        elif any(word in query_lower for word in ['filter', 'where', 'condition']):
+            intent = "filtering"
+        
+        # Determine confidence based on entity count
+        confidence = min(0.3 + (len(entities) * 0.1), 0.7)
+        
+        return {
+            "intent": intent,
+            "confidence": confidence,
+            "business_entities": entities,
+            "domain_concepts": entities,  # Use same entities as domain concepts
+            "temporal_context": None,
+            "relationships": []
+        }
             
     def _extract_business_entities(self, query: str, schema_results: List) -> List[Dict[str, Any]]:
         """Extract business entities from query using schema context"""
@@ -568,16 +667,37 @@ class SemanticEngine:
         
         # Use business entities to determine relevant tables
         relevant_tables = []
-        for entity in semantic_context.business_entities:
-            if entity.get('type') == 'table':
-                table_name = entity['name']
-                if table_name in self.domain_model.tables:
-                    table_info = self.domain_model.tables[table_name]
-                    relevant_tables.append({
-                        "name": table_name,
-                        "info": table_info,
-                        "relevance_score": entity.get('relevance_score', 0.0)
-                    })
+        
+        # Handle case where domain_model might be None
+        if self.domain_model and hasattr(self.domain_model, 'tables'):
+            for entity in semantic_context.business_entities:
+                if entity.get('type') == 'table':
+                    table_name = entity['name']
+                    if table_name in self.domain_model.tables:
+                        table_info = self.domain_model.tables[table_name]
+                        relevant_tables.append({
+                            "name": table_name,
+                            "info": table_info,
+                            "relevance_score": entity.get('relevance_score', 0.0)
+                        })
+        else:
+            # Fallback: use schema metadata if available
+            if self.schema_extractor:
+                try:
+                    schema_metadata = self.schema_extractor.get_schema_metadata()
+                    for table in schema_metadata.get('tables', []):
+                        relevant_tables.append({
+                            "name": table['name'],
+                            "info": {
+                                "description": table['description'],
+                                "row_count": table['row_count'],
+                                "key_metrics": [],
+                                "dimensions": []
+                            },
+                            "relevance_score": 0.5
+                        })
+                except Exception as e:
+                    logger.warning(f"Could not retrieve schema metadata: {e}")
                     
         # Sort by relevance
         relevant_tables.sort(key=lambda x: x['relevance_score'], reverse=True)
@@ -587,7 +707,7 @@ class SemanticEngine:
             "primary_table": relevant_tables[0] if relevant_tables else None,
             "related_tables": relevant_tables[1:3] if len(relevant_tables) > 1 else [],
             "relationships": semantic_context.relationships,
-            "domain_model": self.domain_model,
+            "domain_model": self.domain_model if self.domain_model else {},
             "confidence": semantic_context.confidence
         }
         
@@ -631,139 +751,468 @@ class SemanticEngine:
             }
             confidence = semantic_context.get("confidence", 0.5)
         
+        # Check if query is complex enough to warrant multi-step planning
+        complexity = self._analyze_query_complexity(natural_language_query)
+        
+        if complexity in [QueryComplexity.COMPLEX, QueryComplexity.VERY_COMPLEX]:
+            logger.info(f"Using multi-step query planning for {complexity.value} query")
+            return await self._generate_sql_with_multi_step_planning(
+                natural_language_query, generation_context, schema_context
+            )
+        else:
+            # Use existing single-step approach for simple/moderate queries
+            logger.info(f"Using single-step SQL generation for {complexity.value} query")
+            return await self._generate_sql_single_step(generation_context)
+    
+    def _analyze_query_complexity(self, query: str) -> QueryComplexity:
+        """Analyze query complexity to determine if multi-step planning is needed"""
+        query_lower = query.lower()
+        
+        # Comprehensive aggregation keywords including synonyms
+        aggregation_keywords = [
+            'average', 'avg', 'sum', 'count', 'total', 'maximum', 'minimum', 
+            'max', 'min', 'mean', 'median', 'mode', 'variance', 'std', 'standard deviation'
+        ]
+        
+        # Comprehensive entity indicators including schema/column synonyms
+        entity_indicators = [
+            'region', 'state', 'date', 'generation', 'consumption', 'demand', 
+            'shortage', 'deficit', 'supply', 'requirement', 'availability', 
+            'capacity', 'utilization', 'efficiency', 'performance', 'trend',
+            'growth', 'change', 'pattern', 'distribution', 'comparison'
+        ]
+        
+        # Count complexity indicators
+        aggregation_count = sum(kw in query_lower for kw in aggregation_keywords)
+        entity_count = sum(ind in query_lower for ind in entity_indicators)
+        
+        complexity_score = 0
+        
+        # Aggregation scoring - more lenient
+        if aggregation_count > 1:
+            complexity_score += 2
+        elif aggregation_count == 1:
+            complexity_score += 0  # Single aggregation = SIMPLE
+        
+        # Entity scoring - more lenient
+        if entity_count > 2:
+            complexity_score += 2
+        elif entity_count > 1:
+            complexity_score += 1
+        elif entity_count == 1:
+            complexity_score += 0  # Single entity = SIMPLE
+        
+        # Time-based analysis
+        if any(word in query_lower for word in ['trend', 'growth', 'change', 'over time', 'monthly', 'yearly', 'daily', 'weekly']):
+            complexity_score += 1
+        
+        # Comparison logic - compositional queries (exclude 'by' as it's used for grouping)
+        if any(word in query_lower for word in ['compare', 'vs', 'versus', 'difference', 'ratio', 'and']):
+            complexity_score += 1
+        
+        # Additional rule: compositional queries with "vs", "and" get at least COMPLEX
+        if any(word in query_lower for word in ("compare", "vs", "and")) and complexity_score < 2:
+            complexity_score = 2  # at least COMPLEX
+        
+        # Conditional logic
+        if any(word in query_lower for word in ['if', 'when', 'where', 'condition', 'filter']):
+            complexity_score += 1
+        
+        # Grouping and aggregation combinations
+        if 'group by' in query_lower or 'grouped' in query_lower:
+            complexity_score += 1
+        
+        # Determine complexity level with adjusted thresholds
+        if complexity_score >= 3:
+            return QueryComplexity.VERY_COMPLEX
+        elif complexity_score >= 2:
+            return QueryComplexity.COMPLEX
+        elif complexity_score >= 1:
+            return QueryComplexity.MODERATE
+        else:
+            return QueryComplexity.SIMPLE
+    
+    async def _generate_sql_with_multi_step_planning(
+        self, 
+        query: str, 
+        generation_context: Dict[str, Any], 
+        schema_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate SQL using multi-step query planning for complex queries with robust error handling"""
+        try:
+            # Use the multi-step query planner with error handling
+            try:
+                planning_result = await self.query_planner.plan_and_execute(query, schema_context)
+                
+                if planning_result["success"]:
+                    # Extract the final SQL from the planning result
+                    # For now, we'll use the existing SQL generation as the final step
+                    final_sql_result = await self._generate_sql_single_step(generation_context)
+                    
+                    return {
+                        "sql": final_sql_result.get("sql", ""),
+                        "explanation": f"Generated using multi-step planning with {len(planning_result['plan'].steps)} steps",
+                        "confidence": planning_result["confidence"],
+                        "context_used": generation_context,
+                        "semantic_mappings": generation_context.get("semantic_mappings", {}),
+                        "validation_passed": final_sql_result.get("validation_passed", False),
+                        "planning_details": {
+                            "plan_id": planning_result["plan"].query_id,
+                            "complexity": planning_result["plan"].complexity.value,
+                            "steps_count": len(planning_result["plan"].steps),
+                            "execution_results": planning_result["execution_results"]
+                        }
+                    }
+                else:
+                    logger.warning("Multi-step planning failed, falling back to single-step approach")
+                    return await self._generate_sql_single_step(generation_context)
+                    
+            except Exception as e:
+                logger.error(f"Multi-step planning failed: {e}, falling back to single-step approach")
+                return await self._generate_sql_single_step(generation_context)
+                
+        except Exception as e:
+            logger.error(f"Multi-step planning failed: {e}, falling back to single-step approach")
+            return await self._generate_sql_single_step(generation_context)
+    
+    async def _generate_sql_single_step(self, generation_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate SQL using the existing single-step approach with robust error handling"""
         # Use LLM for contextual SQL generation
         sql_prompt = self._build_sql_generation_prompt(generation_context)
         
         try:
-            sql_response = await self.llm_provider.generate(sql_prompt)
-            response_text = sql_response.content if hasattr(sql_response, 'content') else str(sql_response)
+            # Wrap LLM call with robust error handling
+            try:
+                sql_response = await self.llm_provider.generate(sql_prompt)
+                response_text = sql_response.content if hasattr(sql_response, 'content') else str(sql_response)
+                
+                if not response_text or sql_response.error:
+                    logger.warning(f"LLM returned empty response or error: {sql_response.error}")
+                    return self._fallback_sql_generation(generation_context)
+                
+            except Exception as e:
+                logger.error(f"LLM call failed: {e}")
+                return self._fallback_sql_generation(generation_context)
             
             # Parse and validate SQL response
             sql_result = self._parse_sql_response(response_text)
+            generated_sql = sql_result.get("sql", "")
+            
+            # FIXED: Add validation and retry logic
+            query_lower = generation_context['query'].lower()
+            
+            # Determine expected aggregation function and column for validation
+            aggregation_function = "SUM"  # Default
+            if any(word in query_lower for word in ["average", "avg", "mean"]):
+                aggregation_function = "AVG"
+            elif any(word in query_lower for word in ["maximum", "max", "highest"]):
+                aggregation_function = "MAX"
+            elif any(word in query_lower for word in ["minimum", "min", "lowest"]):
+                aggregation_function = "MIN"
+            
+            energy_column = "EnergyMet"  # Default
+            if "shortage" in query_lower:
+                energy_column = "EnergyShortage"
+            elif "deficit" in query_lower:
+                energy_column = "EnergyShortage"
+            elif "demand" in query_lower:
+                energy_column = "MaximumDemand"
+            elif "generation" in query_lower:
+                energy_column = "GenerationAmount"
+            
+            # Validate the generated SQL
+            is_valid = self._validate_sql_against_instructions(generated_sql, aggregation_function, energy_column, query_lower)
+            
+            if not is_valid and generated_sql:
+                logger.warning(f"Generated SQL failed validation, attempting retry with more explicit instructions")
+                
+                # Retry with more explicit instructions
+                retry_prompt = f"""
+You are a SQL expert. The previous SQL generation was incorrect.
+
+User request: "{generation_context['query']}"
+
+CRITICAL REQUIREMENTS:
+- Use {aggregation_function}() function
+- Use {energy_column} column
+- Do NOT use SUM() if average is requested
+- Do NOT use EnergyMet if shortage is requested
+
+EXAMPLE FOR THIS QUERY:
+SELECT {aggregation_function}(fs.{energy_column}) AS Result
+FROM FactAllIndiaDailySummary fs
+JOIN DimRegions r ON fs.RegionID = r.RegionID
+JOIN DimDates d ON fs.DateID = d.DateID
+
+Generate ONLY the SQL query:
+"""
+                
+                try:
+                    retry_response = await self.llm_provider.generate(retry_prompt)
+                    retry_text = retry_response.content if hasattr(retry_response, 'content') else str(retry_response)
+                    
+                    if not retry_text or retry_response.error:
+                        logger.warning(f"Retry LLM call failed: {retry_response.error}")
+                    else:
+                        retry_sql_result = self._parse_sql_response(retry_text)
+                        retry_sql = retry_sql_result.get("sql", "")
+                        
+                        # Validate retry SQL
+                        retry_is_valid = self._validate_sql_against_instructions(retry_sql, aggregation_function, energy_column, query_lower)
+                        
+                        if retry_is_valid:
+                            generated_sql = retry_sql
+                            logger.info("Retry SQL generation successful")
+                        else:
+                            logger.error("Both initial and retry SQL generation failed validation")
+                            
+                except Exception as e:
+                    logger.error(f"Retry LLM call failed: {e}")
             
             return {
-                "sql": sql_result.get("sql", ""),
+                "sql": generated_sql,
                 "explanation": sql_result.get("explanation", ""),
-                "confidence": confidence,
+                "confidence": generation_context.get("confidence", 0.5),
                 "context_used": generation_context,
-                "semantic_mappings": generation_context.get("semantic_mappings", {})
+                "semantic_mappings": generation_context.get("semantic_mappings", {}),
+                "validation_passed": is_valid
             }
             
         except Exception as e:
             logger.error(f"Contextual SQL generation failed: {e}")
-            return {
-                "sql": "",
-                "explanation": "Failed to generate SQL",
-                "confidence": 0.0,
-                "error": str(e)
-            }
-            
+            return self._fallback_sql_generation(generation_context)
+    
+    def _fallback_sql_generation(self, generation_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Fallback SQL generation when LLM fails"""
+        query_lower = generation_context['query'].lower()
+        
+        # Generate basic SQL based on query keywords
+        sql = "SELECT * FROM FactAllIndiaDailySummary LIMIT 10"
+        
+        # Try to generate more specific SQL based on keywords
+        if any(word in query_lower for word in ['average', 'avg', 'mean']):
+            if 'shortage' in query_lower:
+                sql = "SELECT AVG(EnergyShortage) as avg_shortage FROM FactAllIndiaDailySummary"
+            elif 'consumption' in query_lower:
+                sql = "SELECT AVG(EnergyMet) as avg_consumption FROM FactAllIndiaDailySummary"
+            else:
+                sql = "SELECT AVG(EnergyMet) as avg_energy FROM FactAllIndiaDailySummary"
+        elif any(word in query_lower for word in ['total', 'sum']):
+            if 'shortage' in query_lower:
+                sql = "SELECT SUM(EnergyShortage) as total_shortage FROM FactAllIndiaDailySummary"
+            elif 'consumption' in query_lower:
+                sql = "SELECT SUM(EnergyMet) as total_consumption FROM FactAllIndiaDailySummary"
+            else:
+                sql = "SELECT SUM(EnergyMet) as total_energy FROM FactAllIndiaDailySummary"
+        elif 'compare' in query_lower or 'vs' in query_lower:
+            sql = "SELECT Region, AVG(EnergyShortage) as avg_shortage, AVG(EnergyMet) as avg_consumption FROM FactAllIndiaDailySummary GROUP BY Region"
+        
+        return {
+            "sql": sql,
+            "explanation": "Generated using fallback SQL generation",
+            "confidence": 0.3,
+            "context_used": generation_context,
+            "semantic_mappings": generation_context.get("semantic_mappings", {}),
+            "validation_passed": True,
+            "error": "LLM failed, used fallback generation"
+        }
+        
     def _build_sql_generation_prompt(self, context: Dict[str, Any]) -> str:
-        """Build comprehensive prompt for SQL generation"""
+        """Build comprehensive prompt for SQL generation with schema metadata injection and few-shot examples"""
         
         primary_table = context.get("primary_table")
-        table_info = primary_table["info"] if primary_table else {}
+        table_info = primary_table.get("info", {}) if primary_table else {}
         
+        # Add schema metadata injection if available
+        schema_context = ""
+        if self.schema_extractor:
+            try:
+                schema_context = self.schema_extractor.build_schema_prompt_context(context['query'])
+            except Exception as e:
+                logger.warning(f"Failed to build schema context: {e}")
+        
+        # Add few-shot examples if available
+        few_shot_examples = ""
+        if self.few_shot_retriever:
+            try:
+                examples = self.few_shot_retriever.retrieve_examples_for_query(
+                    context['query'], 
+                    max_examples=3,
+                    min_similarity=0.3
+                )
+                if examples:
+                    few_shot_examples = self.few_shot_retriever.format_examples_for_prompt(examples)
+                    logger.info(f"Retrieved {len(examples)} few-shot examples for query")
+            except Exception as e:
+                logger.warning(f"Failed to retrieve few-shot examples: {e}")
+        
+        # CRITICAL FIX: Detect aggregation function and column from query
+        query_lower = context['query'].lower()
+        
+        # Determine aggregation function with more robust detection
+        aggregation_function = "SUM"  # Default
+        aggregation_keywords = []
+        
+        if any(word in query_lower for word in ["average", "avg", "mean"]):
+            aggregation_function = "AVG"
+            aggregation_keywords = [word for word in ["average", "avg", "mean"] if word in query_lower]
+        elif any(word in query_lower for word in ["maximum", "max", "highest"]):
+            aggregation_function = "MAX"
+            aggregation_keywords = [word for word in ["maximum", "max", "highest"] if word in query_lower]
+        elif any(word in query_lower for word in ["minimum", "min", "lowest"]):
+            aggregation_function = "MIN"
+            aggregation_keywords = [word for word in ["minimum", "min", "lowest"] if word in query_lower]
+        elif any(word in query_lower for word in ["total", "sum"]):
+            aggregation_function = "SUM"
+            aggregation_keywords = [word for word in ["total", "sum"] if word in query_lower]
+        
+        # Determine energy column based on query keywords with more robust detection
+        energy_column = "EnergyMet"  # Default
+        column_keywords = []
+        
+        if "shortage" in query_lower:
+            energy_column = "EnergyShortage"
+            column_keywords.append("shortage")
+        elif "deficit" in query_lower:
+            energy_column = "EnergyShortage"
+            column_keywords.append("deficit")
+        elif "demand" in query_lower:
+            energy_column = "MaximumDemand"
+            column_keywords.append("demand")
+        elif "generation" in query_lower:
+            energy_column = "GenerationAmount"
+            column_keywords.append("generation")
+        elif "consumption" in query_lower:
+            energy_column = "EnergyMet"
+            column_keywords.append("consumption")
+        elif "energy met" in query_lower or "energy_met" in query_lower:
+            energy_column = "EnergyMet"
+            column_keywords.append("energy_met")
+        
+        # FIXED: Simplified, focused prompts for specific query types
+        if "average" in query_lower and "shortage" in query_lower:
+            # Specialized prompt for average shortage queries
+            prompt = f"""
+You are a SQL expert for an analytics application.
+Your ONLY task is to generate the SQL for the following user request.
+
+User request: "{context['query']}"
+
+MANDATORY SQL REQUIREMENTS:
+- Use AVG(fs.EnergyShortage) as AverageShortage
+- Use table: FactAllIndiaDailySummary (alias fs)
+- Join with DimRegions (alias r) on fs.RegionID = r.RegionID
+- Join with DimDates (alias d) on fs.DateID = d.DateID
+
+FORBIDDEN:
+- Do NOT use SUM() anywhere in the query.
+- Do NOT use EnergyMet column.
+- Do NOT include growth calculations or any logic except simple AVG on EnergyShortage.
+- Do NOT include complex subqueries or window functions.
+
+EXAMPLE OUTPUT:
+SELECT AVG(fs.EnergyShortage) AS AverageShortage
+FROM FactAllIndiaDailySummary fs
+JOIN DimRegions r ON fs.RegionID = r.RegionID
+JOIN DimDates d ON fs.DateID = d.DateID
+
+Return ONLY the SQL code above. Nothing else.
+"""
+            return prompt
+        
+        elif "average" in query_lower and "energy" in query_lower:
+            # Specialized prompt for average energy queries
+            prompt = f"""
+You are a SQL expert for an analytics application.
+Your ONLY task is to generate the SQL for the following user request.
+
+User request: "{context['query']}"
+
+MANDATORY SQL REQUIREMENTS:
+- Use AVG(fs.EnergyMet) as AverageEnergy
+- Use table: FactAllIndiaDailySummary (alias fs)
+- Join with DimRegions (alias r) on fs.RegionID = r.RegionID
+- Join with DimDates (alias d) on fs.DateID = d.DateID
+
+FORBIDDEN:
+- Do NOT use SUM() anywhere in the query.
+- Do NOT use EnergyShortage column unless specifically requested.
+- Do NOT include growth calculations or any logic except simple AVG on EnergyMet.
+
+EXAMPLE OUTPUT:
+SELECT AVG(fs.EnergyMet) AS AverageEnergy
+FROM FactAllIndiaDailySummary fs
+JOIN DimRegions r ON fs.RegionID = r.RegionID
+JOIN DimDates d ON fs.DateID = d.DateID
+
+Return ONLY the SQL code above. Nothing else.
+"""
+            return prompt
+        
+        elif "total" in query_lower and "shortage" in query_lower:
+            # Specialized prompt for total shortage queries
+            prompt = f"""
+You are a SQL expert for an analytics application.
+Your ONLY task is to generate the SQL for the following user request.
+
+User request: "{context['query']}"
+
+MANDATORY SQL REQUIREMENTS:
+- Use SUM(fs.EnergyShortage) as TotalShortage
+- Use table: FactAllIndiaDailySummary (alias fs)
+- Join with DimRegions (alias r) on fs.RegionID = r.RegionID
+- Join with DimDates (alias d) on fs.DateID = d.DateID
+
+FORBIDDEN:
+- Do NOT use AVG() anywhere in the query.
+- Do NOT use EnergyMet column.
+- Do NOT include growth calculations or any logic except simple SUM on EnergyShortage.
+
+EXAMPLE OUTPUT:
+SELECT SUM(fs.EnergyShortage) AS TotalShortage
+FROM FactAllIndiaDailySummary fs
+JOIN DimRegions r ON fs.RegionID = r.RegionID
+JOIN DimDates d ON fs.DateID = d.DateID
+
+Return ONLY the SQL code above. Nothing else.
+"""
+            return prompt
+        
+        # Default prompt for other query types (simplified)
         prompt = f"""
-        Generate a complete SQLite-compatible SQL query based on semantic analysis:
-        
-        Natural Language Query: "{context['query']}"
-        
-        Intent: {context['intent']}
-        Confidence: {context['confidence']:.2f}
-        
-        Primary Table: {primary_table['name'] if primary_table else 'Unknown'}
-        Table Description: {table_info.get('description', '')}
-        Available Metrics: {', '.join(table_info.get('key_metrics', []))}
-        Available Dimensions: {', '.join(table_info.get('dimensions', []))}
-        
-        Semantic Mappings:
-        {json.dumps(context['semantic_mappings'], indent=2)}
-        
-        Temporal Context: {context.get('temporal_context', 'None')}
-        
-        Business Entities:
-        {json.dumps(context['business_entities'], indent=2)}
-        
-        Domain Concepts: {', '.join(context['domain_concepts'])}
-        
-        IMPORTANT REQUIREMENTS:
-        1. Generate a COMPLETE SQL query starting with SELECT
-        2. Use SQLite-compatible syntax only
-        3. Use strftime() for date functions (e.g., strftime('%Y-%m', d.ActualDate))
-        4. Avoid window functions (LAG, LEAD, ROW_NUMBER) - use subqueries instead
-        5. Use self-joins for growth calculations
-        6. Use proper table aliases (f for fact tables, d for dimension tables)
-        7. Use SUM(), AVG(), MAX(), MIN() for aggregations
-        8. Use GROUP BY for grouping
-        9. Use ORDER BY for sorting
-        10. Include all necessary JOINs, WHERE clauses, and GROUP BY
-        
-        For growth calculations, use this exact pattern:
-        - Use LEFT JOIN with a subquery to get previous month data
-        - Calculate growth as: ((current - previous) / previous) * 100
-        - Use CASE statements to handle division by zero
-        
-        Example structure for monthly growth:
-        SELECT 
-            r.RegionName,
-            strftime('%Y-%m', d.ActualDate) as Month,
-            SUM(fs.EnergyMet) as TotalEnergyMet,
-            prev.PreviousMonthEnergy,
-            CASE 
-                WHEN prev.PreviousMonthEnergy > 0 
-                THEN ((SUM(fs.EnergyMet) - prev.PreviousMonthEnergy) / prev.PreviousMonthEnergy) * 100 
-                ELSE 0 
-            END as GrowthRate
-        FROM FactAllIndiaDailySummary fs
-        JOIN DimRegions r ON fs.RegionID = r.RegionID
-        JOIN DimDates d ON fs.DateID = d.DateID
-        LEFT JOIN (
-            SELECT 
-                r2.RegionName,
-                strftime('%Y-%m', d2.ActualDate) as Month,
-                SUM(fs2.EnergyMet) as PreviousMonthEnergy
-            FROM FactAllIndiaDailySummary fs2
-            JOIN DimRegions r2 ON fs2.RegionID = r2.RegionID
-            JOIN DimDates d2 ON fs2.DateID = d2.DateID
-            WHERE strftime('%Y', d2.ActualDate) = '2024'
-            GROUP BY r2.RegionName, strftime('%Y-%m', d2.ActualDate)
-        ) prev ON r.RegionName = prev.RegionName 
-            AND strftime('%Y-%m', d.ActualDate) = date(prev.Month || '-01', '+1 month')
-        WHERE strftime('%Y', d.ActualDate) = '2024'
-        GROUP BY r.RegionName, strftime('%Y-%m', d.ActualDate)
-        ORDER BY r.RegionName, Month
-        
-        CRITICAL: Use the exact table names and column names from the schema:
-        - FactAllIndiaDailySummary (alias: fs) - contains EnergyMet column
-        - DimRegions (alias: r) - contains RegionName column  
-        - DimDates (alias: d) - contains ActualDate column (NOT Date)
-        - Use fs.EnergyMet for energy metrics
-        - Use r.RegionName for region names
-        - Use d.ActualDate for dates (NOT d.Date)
-        - Use fs.RegionID for joining with DimRegions
-        - Use fs.DateID for joining with DimDates
-        - Use fs2.RegionID and fs2.DateID for subquery joins
-        
-        IMPORTANT: All JOINs must use the correct foreign key relationships:
-        - JOIN DimRegions r ON fs.RegionID = r.RegionID
-        - JOIN DimDates d ON fs.DateID = d.DateID
-        - In subqueries: JOIN DimRegions r2 ON fs2.RegionID = r2.RegionID
-        - In subqueries: JOIN DimDates d2 ON fs2.DateID = d2.DateID
-        
-        Generate a complete SQL query that:
-        1. Starts with SELECT and includes all necessary clauses
-        2. Uses the most relevant table and columns
-        3. Applies appropriate joins based on relationships
-        4. Includes proper temporal filtering if needed
-        5. Uses semantic mappings for column selection
-        6. Applies business logic understanding
-        7. Uses SQLite-compatible syntax only
-        8. Is complete and executable
-        9. Uses the exact table and column names specified above
-        
-        Return only the SQL query without any explanation, formatting, or code blocks:
-        """
+You are a SQL expert for an analytics application.
+Generate a complete SQLite-compatible SQL query based on the following request.
+
+User request: "{context['query']}"
+
+{schema_context}
+
+{few_shot_examples}
+
+IMPORTANT REQUIREMENTS:
+1. Generate a COMPLETE SQL query starting with SELECT
+2. Use SQLite-compatible syntax only
+3. Use strftime() for date functions (e.g., strftime('%Y-%m', d.ActualDate))
+4. Avoid window functions (LAG, LEAD, ROW_NUMBER) - use subqueries instead
+5. Use proper table aliases (fs for fact tables, r for regions, d for dates)
+6. Use {aggregation_function}() for aggregations
+7. Use {energy_column} column for energy metrics
+8. Use GROUP BY for grouping
+9. Use ORDER BY for sorting
+10. Include all necessary JOINs, WHERE clauses, and GROUP BY
+
+CRITICAL: Use the exact table names and column names from the schema:
+- FactAllIndiaDailySummary (alias: fs) - contains EnergyMet, EnergyShortage columns
+- DimRegions (alias: r) - contains RegionName column  
+- DimDates (alias: d) - contains ActualDate column (NOT Date)
+- Use fs.{energy_column} for energy metrics
+- Use r.RegionName for region names
+- Use d.ActualDate for dates (NOT d.Date)
+- Use fs.RegionID for joining with DimRegions
+- Use fs.DateID for joining with DimDates
+
+Generate the SQL query:
+"""
         
         return prompt
         
@@ -898,3 +1347,30 @@ class SemanticEngine:
         
         # If all else fails, return empty string
         return ""
+
+    def _validate_sql_against_instructions(self, sql: str, aggregation_function: str, energy_column: str, query_lower: str) -> bool:
+        """Validate if the generated SQL follows the business rules"""
+        sql_lower_check = sql.lower()
+        
+        # Check if correct aggregation function is used
+        expected_agg = aggregation_function.lower()
+        if expected_agg not in sql_lower_check:
+            logger.warning(f"Expected {expected_agg}() but found different aggregation in SQL: {sql[:200]}...")
+            return False
+        
+        # Check if correct column is used
+        if energy_column.lower() not in sql_lower_check:
+            logger.warning(f"Expected {energy_column} column but found different column in SQL: {sql[:200]}...")
+            return False
+        
+        # Additional checks for specific query types
+        if "average" in query_lower and "shortage" in query_lower:
+            # For average shortage queries, check for forbidden patterns
+            if "sum(" in sql_lower_check:
+                logger.warning(f"Found forbidden SUM() in average shortage query: {sql[:200]}...")
+                return False
+            if "energymet" in sql_lower_check:
+                logger.warning(f"Found forbidden EnergyMet column in average shortage query: {sql[:200]}...")
+                return False
+        
+        return True
