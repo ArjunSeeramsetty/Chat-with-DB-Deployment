@@ -253,17 +253,33 @@ class AgenticRAGService:
         results = workflow_result.get("results", {})
         
         # Get SQL from SQL generation step
-        sql_generation = results.get("sql_generation", {})
-        sql = sql_generation.get("data", {}).get("sql", "") if sql_generation.get("success") else ""
+        sql_generation = results.get("sql_generation")
+        sql = ""
+        if sql_generation and hasattr(sql_generation, 'data'):
+            sql = sql_generation.data.get("sql", "") if sql_generation.success else ""
+        elif sql_generation and isinstance(sql_generation, dict):
+            sql = sql_generation.get("data", {}).get("sql", "") if sql_generation.get("success") else ""
         
         # Get execution data
-        execution = results.get("execution", {})
-        data = execution.get("data", {}).get("data", []) if execution.get("success") else []
-        row_count = execution.get("data", {}).get("row_count", 0) if execution.get("success") else 0
+        execution = results.get("execution")
+        data = []
+        row_count = 0
+        if execution and hasattr(execution, 'data'):
+            if execution.success:
+                data = execution.data.get("data", [])
+                row_count = execution.data.get("row_count", 0)
+        elif execution and isinstance(execution, dict):
+            if execution.get("success"):
+                data = execution.get("data", {}).get("data", [])
+                row_count = execution.get("data", {}).get("row_count", 0)
         
         # Get visualization
-        visualization = results.get("visualization", {})
-        viz_data = visualization.get("data", {}) if visualization.get("success") else {}
+        visualization = results.get("visualization")
+        viz_data = {}
+        if visualization and hasattr(visualization, 'data'):
+            viz_data = visualization.data if visualization.success else {}
+        elif visualization and isinstance(visualization, dict):
+            viz_data = visualization.get("data", {}) if visualization.get("success") else {}
         
         # Calculate overall confidence
         confidence = self._calculate_overall_confidence(results)
@@ -275,11 +291,12 @@ class AgenticRAGService:
                 chart_type=viz_data.get("chart_type", "bar"),
                 config=viz_data.get("config", {}),
                 confidence=viz_data.get("confidence", 0.0),
-                reasoning=f"AI-powered recommendation from {visualization.get('metadata', {}).get('chart_type', 'unknown')} agent"
+                reasoning=f"AI-powered recommendation from visualization agent"
             )
         
         return QueryResponse(
-            sql=sql,
+            success=True,
+            sql_query=sql,
             data=data,
             visualization=viz_recommendation,
             explanation=self._generate_explanation(results),
@@ -291,22 +308,33 @@ class AgenticRAGService:
             row_count=row_count
         )
     
-    def _calculate_overall_confidence(self, results: Dict[str, AgentResult]) -> float:
+    def _calculate_overall_confidence(self, results: Dict[str, Any]) -> float:
         """Calculate overall confidence from agent results"""
         if not results:
             return 0.0
         
-        confidences = [result.confidence for result in results.values() if result.success]
+        confidences = []
+        for result in results.values():
+            if hasattr(result, 'success') and result.success:
+                if hasattr(result, 'confidence'):
+                    confidences.append(result.confidence)
+            elif isinstance(result, dict) and result.get("success"):
+                confidences.append(result.get("confidence", 0.0))
+        
         return sum(confidences) / len(confidences) if confidences else 0.0
     
-    def _generate_explanation(self, results: Dict[str, AgentResult]) -> str:
+    def _generate_explanation(self, results: Dict[str, Any]) -> str:
         """Generate explanation from workflow results"""
         explanations = []
         
         for step_id, result in results.items():
-            if result.success:
+            if hasattr(result, 'success') and result.success:
                 step_name = step_id.replace("_", " ").title()
-                confidence = result.confidence
+                confidence = getattr(result, 'confidence', 0.0)
+                explanations.append(f"{step_name}: {confidence:.1%} confidence")
+            elif isinstance(result, dict) and result.get("success"):
+                step_name = step_id.replace("_", " ").title()
+                confidence = result.get("confidence", 0.0)
                 explanations.append(f"{step_name}: {confidence:.1%} confidence")
         
         if explanations:
@@ -314,20 +342,28 @@ class AgenticRAGService:
         else:
             return "Query processing completed with some issues"
     
-    def _build_context_info(self, results: Dict[str, AgentResult], context: WorkflowContext) -> Dict[str, Any]:
+    def _build_context_info(self, results: Dict[str, Any], context: WorkflowContext) -> Dict[str, Any]:
         """Build context information from workflow results"""
+        agent_results = {}
+        for step_id, result in results.items():
+            if hasattr(result, 'success'):
+                agent_results[step_id] = {
+                    "success": result.success,
+                    "confidence": getattr(result, 'confidence', 0.0),
+                    "execution_time": getattr(result, 'execution_time', 0.0)
+                }
+            elif isinstance(result, dict):
+                agent_results[step_id] = {
+                    "success": result.get("success", False),
+                    "confidence": result.get("confidence", 0.0),
+                    "execution_time": result.get("execution_time", 0.0)
+                }
+        
         return {
             "workflow_id": context.workflow_id,
             "session_id": context.session_id,
             "processing_mode": "agentic_workflow",
-            "agent_results": {
-                step_id: {
-                    "success": result.success,
-                    "confidence": result.confidence,
-                    "execution_time": result.execution_time
-                }
-                for step_id, result in results.items()
-            },
+            "agent_results": agent_results,
             "workflow_events": len(context.events),
             "workflow_errors": len(context.errors)
         }

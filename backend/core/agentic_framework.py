@@ -174,22 +174,38 @@ class QueryAnalysisAgent(BaseAgent):
         # This would integrate with the existing intent analyzer
         from backend.core.intent import IntentAnalyzer
         
-        analyzer = IntentAnalyzer()
-        analysis = await analyzer.analyze_intent(query)
-        
-        return {
-            "intent": analysis.intent.value,
-            "entities": analysis.entities,
-            "query_type": analysis.query_type.value,
-            "confidence": analysis.confidence,
-            "time_period": analysis.time_period,
-            "metrics": analysis.metrics,
-            "main_table": analysis.main_table,
-            "dimension_table": analysis.dimension_table,
-            "join_key": analysis.join_key,
-            "name_column": analysis.name_column,
-            "detected_keywords": analysis.detected_keywords
-        }
+        try:
+            analyzer = IntentAnalyzer()
+            analysis = await analyzer.analyze_intent(query)
+            
+            return {
+                "intent": analysis.intent.value if hasattr(analysis.intent, 'value') else str(analysis.intent),
+                "entities": analysis.entities if hasattr(analysis, 'entities') else [],
+                "query_type": analysis.query_type.value if hasattr(analysis.query_type, 'value') else str(analysis.query_type),
+                "confidence": analysis.confidence if hasattr(analysis, 'confidence') else 0.0,
+                "time_period": analysis.time_period if hasattr(analysis, 'time_period') else "unknown",
+                "metrics": analysis.metrics if hasattr(analysis, 'metrics') else [],
+                "main_table": analysis.main_table if hasattr(analysis, 'main_table') else "",
+                "dimension_table": analysis.dimension_table if hasattr(analysis, 'dimension_table') else "",
+                "join_key": analysis.join_key if hasattr(analysis, 'join_key') else "",
+                "name_column": analysis.name_column if hasattr(analysis, 'name_column') else "",
+                "detected_keywords": analysis.detected_keywords if hasattr(analysis, 'detected_keywords') else []
+            }
+        except Exception as e:
+            self.logger.error(f"Query analysis error: {e}")
+            return {
+                "intent": "unknown",
+                "entities": [],
+                "query_type": "unknown",
+                "confidence": 0.0,
+                "time_period": "unknown",
+                "metrics": [],
+                "main_table": "",
+                "dimension_table": "",
+                "join_key": "",
+                "name_column": "",
+                "detected_keywords": []
+            }
 
 
 class SQLGenerationAgent(BaseAgent):
@@ -238,17 +254,68 @@ class SQLGenerationAgent(BaseAgent):
     async def _generate_sql(self, query: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
         """Generate SQL using existing assembler"""
         from backend.core.assembler import SQLAssembler
+        from backend.core.types import QueryAnalysis, ContextInfo, QueryType, IntentType
         
-        assembler = SQLAssembler()
-        sql = assembler.assemble_sql(query, analysis)
-        
-        return {
-            "sql": sql,
-            "confidence": analysis.get("confidence", 0.0),
-            "query_type": analysis.get("query_type"),
-            "tables_used": analysis.get("main_table", ""),
-            "generation_method": "assembler"
-        }
+        try:
+            # Create SQLAssembler instance
+            assembler = SQLAssembler()
+            
+            # Convert analysis dict to QueryAnalysis object if needed
+            if isinstance(analysis, dict):
+                # Create a basic QueryAnalysis object from the dict with required fields
+                query_analysis = QueryAnalysis(
+                    original_query=query,
+                    query_type=QueryType(analysis.get("query_type", "unknown")),
+                    intent=IntentType(analysis.get("intent", "unknown")),
+                    entities=analysis.get("entities", []),
+                    time_period=analysis.get("time_period", "unknown"),
+                    confidence=analysis.get("confidence", 0.0),
+                    main_table=analysis.get("main_table", ""),
+                    dimension_table=analysis.get("dimension_table", ""),
+                    join_key=analysis.get("join_key", ""),
+                    name_column=analysis.get("name_column", ""),
+                    detected_keywords=analysis.get("detected_keywords", [])
+                )
+            else:
+                query_analysis = analysis
+            
+            # Create a basic context
+            context = ContextInfo(
+                query_analysis=query_analysis,
+                user_mappings=[],
+                dimension_values={},
+                schema_linker=None,
+                llm_provider=None
+            )
+            
+            # Generate SQL using the correct method
+            sql_result = assembler.generate_sql(query, query_analysis, context)
+            
+            # Extract SQL from the result
+            if hasattr(sql_result, 'sql'):
+                sql = sql_result.sql
+            elif isinstance(sql_result, dict):
+                sql = sql_result.get('sql', '')
+            else:
+                sql = str(sql_result)
+            
+            return {
+                "sql": sql,
+                "confidence": analysis.get("confidence", 0.0),
+                "query_type": analysis.get("query_type", "unknown"),
+                "tables_used": analysis.get("main_table", ""),
+                "generation_method": "assembler"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"SQL generation error: {e}")
+            return {
+                "sql": f"-- SQL generation failed: {str(e)}",
+                "confidence": 0.0,
+                "query_type": "unknown",
+                "tables_used": "",
+                "generation_method": "error"
+            }
 
 
 class ValidationAgent(BaseAgent):
@@ -386,17 +453,27 @@ class ExecutionAgent(BaseAgent):
         from backend.core.executor import AsyncSQLExecutor
         from backend.config import get_settings
         
-        settings = get_settings()
-        executor = AsyncSQLExecutor(settings.database_path)
-        result = await executor.execute_query(sql)
-        
-        return {
-            "success": result.success,
-            "data": result.data,
-            "row_count": result.row_count,
-            "execution_time": result.execution_time,
-            "error": result.error
-        }
+        try:
+            settings = get_settings()
+            executor = AsyncSQLExecutor(settings.database_path)
+            result = await executor.execute_sql_async(sql)
+            
+            return {
+                "success": result.success,
+                "data": result.data,
+                "row_count": result.row_count,
+                "execution_time": result.execution_time,
+                "error": result.error
+            }
+        except Exception as e:
+            self.logger.error(f"SQL execution error: {e}")
+            return {
+                "success": False,
+                "data": [],
+                "row_count": 0,
+                "execution_time": 0.0,
+                "error": str(e)
+            }
 
 
 class VisualizationAgent(BaseAgent):
