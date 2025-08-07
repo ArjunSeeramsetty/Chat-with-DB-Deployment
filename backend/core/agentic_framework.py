@@ -1,0 +1,700 @@
+"""
+Agentic Framework for Phase 2: Agentic Workflow Implementation
+Inspired by Motia framework for step-based architecture and event-driven processing
+"""
+
+import asyncio
+import logging
+import time
+import uuid
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional, Callable, Awaitable
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+class AgentType(str, Enum):
+    """Types of specialized agents"""
+    QUERY_ANALYSIS = "query_analysis"
+    SQL_GENERATION = "sql_generation"
+    VALIDATION = "validation"
+    EXECUTION = "execution"
+    VISUALIZATION = "visualization"
+    FEEDBACK = "feedback"
+
+
+class WorkflowStatus(str, Enum):
+    """Workflow execution status"""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class EventType(str, Enum):
+    """Event types for event-driven processing"""
+    QUERY_RECEIVED = "query_received"
+    ANALYSIS_COMPLETE = "analysis_complete"
+    SQL_GENERATED = "sql_generated"
+    VALIDATION_COMPLETE = "validation_complete"
+    EXECUTION_COMPLETE = "execution_complete"
+    VISUALIZATION_COMPLETE = "visualization_complete"
+    ERROR_OCCURRED = "error_occurred"
+    WORKFLOW_COMPLETE = "workflow_complete"
+
+
+@dataclass
+class WorkflowContext:
+    """Context for workflow execution"""
+    workflow_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str = "default_user"
+    query: str = ""
+    start_time: datetime = field(default_factory=datetime.now)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    state: Dict[str, Any] = field(default_factory=dict)
+    events: List[Dict[str, Any]] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+    performance_metrics: Dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
+class AgentResult:
+    """Result from agent execution"""
+    success: bool
+    data: Dict[str, Any]
+    confidence: float = 0.0
+    execution_time: float = 0.0
+    error: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class WorkflowStep:
+    """Individual step in a workflow"""
+    step_id: str
+    agent_type: AgentType
+    name: str
+    description: str
+    dependencies: List[str] = field(default_factory=list)
+    timeout: float = 30.0
+    retry_count: int = 3
+    retry_delay: float = 1.0
+    required: bool = True
+    handler: Optional[Callable] = None
+
+
+@dataclass
+class WorkflowDefinition:
+    """Definition of a complete workflow"""
+    workflow_id: str
+    name: str
+    description: str
+    steps: List[WorkflowStep]
+    max_execution_time: float = 300.0
+    parallel_execution: bool = False
+    error_handling: str = "continue"  # continue, stop, retry
+
+
+class BaseAgent(ABC):
+    """Base class for all agents"""
+    
+    def __init__(self, agent_type: AgentType, name: str):
+        self.agent_type = agent_type
+        self.name = name
+        self.logger = logging.getLogger(f"agent.{name}")
+        
+    @abstractmethod
+    async def execute(self, context: WorkflowContext, **kwargs) -> AgentResult:
+        """Execute the agent's main logic"""
+        pass
+    
+    async def pre_execute(self, context: WorkflowContext) -> bool:
+        """Pre-execution checks and setup"""
+        return True
+    
+    async def post_execute(self, context: WorkflowContext, result: AgentResult) -> None:
+        """Post-execution cleanup and logging"""
+        self.logger.info(f"Agent {self.name} completed with confidence: {result.confidence:.2f}")
+    
+    def get_required_context(self) -> List[str]:
+        """Get required context keys for this agent"""
+        return []
+
+
+class QueryAnalysisAgent(BaseAgent):
+    """Agent for analyzing natural language queries"""
+    
+    def __init__(self):
+        super().__init__(AgentType.QUERY_ANALYSIS, "QueryAnalysisAgent")
+        
+    async def execute(self, context: WorkflowContext, **kwargs) -> AgentResult:
+        start_time = time.time()
+        
+        try:
+            # Extract query from context
+            query = context.query
+            if not query:
+                return AgentResult(
+                    success=False,
+                    data={},
+                    error="No query provided",
+                    execution_time=time.time() - start_time
+                )
+            
+            # Perform query analysis
+            analysis_result = await self._analyze_query(query)
+            
+            # Update context with analysis results
+            context.state["query_analysis"] = analysis_result
+            
+            return AgentResult(
+                success=True,
+                data=analysis_result,
+                confidence=analysis_result.get("confidence", 0.0),
+                execution_time=time.time() - start_time,
+                metadata={"query_length": len(query)}
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Query analysis failed: {e}")
+            return AgentResult(
+                success=False,
+                data={},
+                error=str(e),
+                execution_time=time.time() - start_time
+            )
+    
+    async def _analyze_query(self, query: str) -> Dict[str, Any]:
+        """Analyze the query for intent, entities, and context"""
+        # This would integrate with the existing intent analyzer
+        from backend.core.intent import IntentAnalyzer
+        
+        analyzer = IntentAnalyzer()
+        analysis = await analyzer.analyze_intent(query)
+        
+        return {
+            "intent": analysis.intent.value,
+            "entities": analysis.entities,
+            "query_type": analysis.query_type.value,
+            "confidence": analysis.confidence,
+            "time_period": analysis.time_period,
+            "metrics": analysis.metrics,
+            "main_table": analysis.main_table,
+            "dimension_table": analysis.dimension_table,
+            "join_key": analysis.join_key,
+            "name_column": analysis.name_column,
+            "detected_keywords": analysis.detected_keywords
+        }
+
+
+class SQLGenerationAgent(BaseAgent):
+    """Agent for generating SQL queries"""
+    
+    def __init__(self):
+        super().__init__(AgentType.SQL_GENERATION, "SQLGenerationAgent")
+        
+    async def execute(self, context: WorkflowContext, **kwargs) -> AgentResult:
+        start_time = time.time()
+        
+        try:
+            # Get query analysis from context
+            query_analysis = context.state.get("query_analysis")
+            if not query_analysis:
+                return AgentResult(
+                    success=False,
+                    data={},
+                    error="Query analysis not available",
+                    execution_time=time.time() - start_time
+                )
+            
+            # Generate SQL using existing assembler
+            sql_result = await self._generate_sql(context.query, query_analysis)
+            
+            # Update context with SQL result
+            context.state["sql_generation"] = sql_result
+            
+            return AgentResult(
+                success=True,
+                data=sql_result,
+                confidence=sql_result.get("confidence", 0.0),
+                execution_time=time.time() - start_time,
+                metadata={"sql_length": len(sql_result.get("sql", ""))}
+            )
+            
+        except Exception as e:
+            self.logger.error(f"SQL generation failed: {e}")
+            return AgentResult(
+                success=False,
+                data={},
+                error=str(e),
+                execution_time=time.time() - start_time
+            )
+    
+    async def _generate_sql(self, query: str, analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate SQL using existing assembler"""
+        from backend.core.assembler import SQLAssembler
+        
+        assembler = SQLAssembler()
+        sql = assembler.assemble_sql(query, analysis)
+        
+        return {
+            "sql": sql,
+            "confidence": analysis.get("confidence", 0.0),
+            "query_type": analysis.get("query_type"),
+            "tables_used": analysis.get("main_table", ""),
+            "generation_method": "assembler"
+        }
+
+
+class ValidationAgent(BaseAgent):
+    """Agent for validating SQL queries"""
+    
+    def __init__(self):
+        super().__init__(AgentType.VALIDATION, "ValidationAgent")
+        
+    async def execute(self, context: WorkflowContext, **kwargs) -> AgentResult:
+        start_time = time.time()
+        
+        try:
+            # Get SQL from context
+            sql_generation = context.state.get("sql_generation")
+            if not sql_generation:
+                return AgentResult(
+                    success=False,
+                    data={},
+                    error="SQL generation not available",
+                    execution_time=time.time() - start_time
+                )
+            
+            sql = sql_generation.get("sql", "")
+            if not sql:
+                return AgentResult(
+                    success=False,
+                    data={},
+                    error="No SQL to validate",
+                    execution_time=time.time() - start_time
+                )
+            
+            # Validate SQL using existing validator
+            validation_result = await self._validate_sql(sql)
+            
+            # Update context with validation result
+            context.state["validation"] = validation_result
+            
+            return AgentResult(
+                success=validation_result.get("is_valid", False),
+                data=validation_result,
+                confidence=validation_result.get("confidence", 0.0),
+                execution_time=time.time() - start_time,
+                metadata={"validation_checks": len(validation_result.get("checks", []))}
+            )
+            
+        except Exception as e:
+            self.logger.error(f"SQL validation failed: {e}")
+            return AgentResult(
+                success=False,
+                data={},
+                error=str(e),
+                execution_time=time.time() - start_time
+            )
+    
+    async def _validate_sql(self, sql: str) -> Dict[str, Any]:
+        """Validate SQL using existing validator"""
+        from backend.core.validator import EnhancedSQLValidator
+        
+        validator = EnhancedSQLValidator()
+        result = validator.validate_sql(sql)
+        
+        return {
+            "is_valid": result.is_valid,
+            "confidence": result.confidence if hasattr(result, 'confidence') else 0.0,
+            "errors": result.errors if hasattr(result, 'errors') else [],
+            "warnings": result.warnings if hasattr(result, 'warnings') else [],
+            "checks": ["syntax", "schema", "security"]
+        }
+
+
+class ExecutionAgent(BaseAgent):
+    """Agent for executing SQL queries"""
+    
+    def __init__(self):
+        super().__init__(AgentType.EXECUTION, "ExecutionAgent")
+        
+    async def execute(self, context: WorkflowContext, **kwargs) -> AgentResult:
+        start_time = time.time()
+        
+        try:
+            # Get SQL and validation from context
+            sql_generation = context.state.get("sql_generation")
+            validation = context.state.get("validation")
+            
+            if not sql_generation:
+                return AgentResult(
+                    success=False,
+                    data={},
+                    error="SQL generation not available",
+                    execution_time=time.time() - start_time
+                )
+            
+            if validation and not validation.get("is_valid", False):
+                return AgentResult(
+                    success=False,
+                    data={},
+                    error="SQL validation failed",
+                    execution_time=time.time() - start_time
+                )
+            
+            sql = sql_generation.get("sql", "")
+            if not sql:
+                return AgentResult(
+                    success=False,
+                    data={},
+                    error="No SQL to execute",
+                    execution_time=time.time() - start_time
+                )
+            
+            # Execute SQL using existing executor
+            execution_result = await self._execute_sql(sql)
+            
+            # Update context with execution result
+            context.state["execution"] = execution_result
+            
+            return AgentResult(
+                success=execution_result.get("success", False),
+                data=execution_result,
+                confidence=1.0 if execution_result.get("success") else 0.0,
+                execution_time=time.time() - start_time,
+                metadata={"row_count": execution_result.get("row_count", 0)}
+            )
+            
+        except Exception as e:
+            self.logger.error(f"SQL execution failed: {e}")
+            return AgentResult(
+                success=False,
+                data={},
+                error=str(e),
+                execution_time=time.time() - start_time
+            )
+    
+    async def _execute_sql(self, sql: str) -> Dict[str, Any]:
+        """Execute SQL using existing executor"""
+        from backend.core.executor import AsyncSQLExecutor
+        from backend.config import get_settings
+        
+        settings = get_settings()
+        executor = AsyncSQLExecutor(settings.database_path)
+        result = await executor.execute_query(sql)
+        
+        return {
+            "success": result.success,
+            "data": result.data,
+            "row_count": result.row_count,
+            "execution_time": result.execution_time,
+            "error": result.error
+        }
+
+
+class VisualizationAgent(BaseAgent):
+    """Agent for generating visualizations"""
+    
+    def __init__(self):
+        super().__init__(AgentType.VISUALIZATION, "VisualizationAgent")
+        
+    async def execute(self, context: WorkflowContext, **kwargs) -> AgentResult:
+        start_time = time.time()
+        
+        try:
+            # Get execution result from context
+            execution = context.state.get("execution")
+            if not execution or not execution.get("success"):
+                return AgentResult(
+                    success=False,
+                    data={},
+                    error="No execution data available",
+                    execution_time=time.time() - start_time
+                )
+            
+            data = execution.get("data", [])
+            if not data:
+                return AgentResult(
+                    success=False,
+                    data={},
+                    error="No data to visualize",
+                    execution_time=time.time() - start_time
+                )
+            
+            # Generate visualization
+            viz_result = await self._generate_visualization(data, context.query)
+            
+            # Update context with visualization result
+            context.state["visualization"] = viz_result
+            
+            return AgentResult(
+                success=True,
+                data=viz_result,
+                confidence=viz_result.get("confidence", 0.0),
+                execution_time=time.time() - start_time,
+                metadata={"chart_type": viz_result.get("chart_type")}
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Visualization generation failed: {e}")
+            return AgentResult(
+                success=False,
+                data={},
+                error=str(e),
+                execution_time=time.time() - start_time
+            )
+    
+    async def _generate_visualization(self, data: List[Dict[str, Any]], query: str) -> Dict[str, Any]:
+        """Generate visualization recommendation"""
+        if not data:
+            return {"chart_type": "none", "confidence": 0.0}
+        
+        # Simple rule-based visualization selection
+        headers = list(data[0].keys()) if data else []
+        
+        # Determine chart type based on data characteristics
+        if any("month" in h.lower() for h in headers):
+            chart_type = "line"
+        elif any("growth" in h.lower() or "percentage" in h.lower() for h in headers):
+            chart_type = "dualAxisLine"
+        else:
+            chart_type = "bar"
+        
+        return {
+            "chart_type": chart_type,
+            "confidence": 0.8,
+            "config": {
+                "title": f"Data Visualization for: {query[:50]}...",
+                "xAxis": headers[0] if headers else "",
+                "yAxis": headers[1:] if len(headers) > 1 else []
+            }
+        }
+
+
+class WorkflowEngine:
+    """Main workflow engine for orchestrating agentic workflows"""
+    
+    def __init__(self):
+        self.agents: Dict[AgentType, BaseAgent] = {}
+        self.workflows: Dict[str, WorkflowDefinition] = {}
+        self.event_handlers: Dict[EventType, List[Callable]] = {}
+        self.logger = logging.getLogger("workflow_engine")
+        
+        # Register default agents
+        self._register_default_agents()
+        
+        # Register default workflows
+        self._register_default_workflows()
+        
+        # Register default event handlers
+        self._register_default_event_handlers()
+    
+    def _register_default_agents(self):
+        """Register default agents"""
+        self.register_agent(QueryAnalysisAgent())
+        self.register_agent(SQLGenerationAgent())
+        self.register_agent(ValidationAgent())
+        self.register_agent(ExecutionAgent())
+        self.register_agent(VisualizationAgent())
+    
+    def _register_default_workflows(self):
+        """Register default workflows"""
+        # Standard query processing workflow
+        standard_workflow = WorkflowDefinition(
+            workflow_id="standard_query_processing",
+            name="Standard Query Processing",
+            description="Standard workflow for processing natural language queries",
+            steps=[
+                WorkflowStep(
+                    step_id="query_analysis",
+                    agent_type=AgentType.QUERY_ANALYSIS,
+                    name="Query Analysis",
+                    description="Analyze natural language query for intent and entities"
+                ),
+                WorkflowStep(
+                    step_id="sql_generation",
+                    agent_type=AgentType.SQL_GENERATION,
+                    name="SQL Generation",
+                    description="Generate SQL query based on analysis",
+                    dependencies=["query_analysis"]
+                ),
+                WorkflowStep(
+                    step_id="validation",
+                    agent_type=AgentType.VALIDATION,
+                    name="SQL Validation",
+                    description="Validate generated SQL",
+                    dependencies=["sql_generation"]
+                ),
+                WorkflowStep(
+                    step_id="execution",
+                    agent_type=AgentType.EXECUTION,
+                    name="SQL Execution",
+                    description="Execute validated SQL",
+                    dependencies=["validation"]
+                ),
+                WorkflowStep(
+                    step_id="visualization",
+                    agent_type=AgentType.VISUALIZATION,
+                    name="Visualization",
+                    description="Generate visualization recommendations",
+                    dependencies=["execution"]
+                )
+            ]
+        )
+        
+        self.register_workflow(standard_workflow)
+    
+    def _register_default_event_handlers(self):
+        """Register default event handlers"""
+        self.register_event_handler(EventType.QUERY_RECEIVED, self._log_query_received)
+        self.register_event_handler(EventType.WORKFLOW_COMPLETE, self._log_workflow_complete)
+        self.register_event_handler(EventType.ERROR_OCCURRED, self._log_error)
+    
+    def register_agent(self, agent: BaseAgent):
+        """Register an agent"""
+        self.agents[agent.agent_type] = agent
+        self.logger.info(f"Registered agent: {agent.name} ({agent.agent_type})")
+    
+    def register_workflow(self, workflow: WorkflowDefinition):
+        """Register a workflow"""
+        self.workflows[workflow.workflow_id] = workflow
+        self.logger.info(f"Registered workflow: {workflow.name} ({workflow.workflow_id})")
+    
+    def register_event_handler(self, event_type: EventType, handler: Callable):
+        """Register an event handler"""
+        if event_type not in self.event_handlers:
+            self.event_handlers[event_type] = []
+        self.event_handlers[event_type].append(handler)
+    
+    async def execute_workflow(self, workflow_id: str, context: WorkflowContext) -> Dict[str, Any]:
+        """Execute a workflow"""
+        if workflow_id not in self.workflows:
+            raise ValueError(f"Workflow {workflow_id} not found")
+        
+        workflow = self.workflows[workflow_id]
+        self.logger.info(f"Starting workflow: {workflow.name} ({workflow.workflow_id})")
+        
+        # Emit workflow start event
+        await self._emit_event(EventType.QUERY_RECEIVED, context)
+        
+        try:
+            # Execute steps
+            results = {}
+            for step in workflow.steps:
+                step_result = await self._execute_step(step, context)
+                results[step.step_id] = step_result
+                
+                if not step_result.success and step.required:
+                    self.logger.error(f"Required step {step.name} failed")
+                    await self._emit_event(EventType.ERROR_OCCURRED, context, error=step_result.error)
+                    break
+            
+            # Emit workflow complete event
+            await self._emit_event(EventType.WORKFLOW_COMPLETE, context)
+            
+            return {
+                "workflow_id": workflow_id,
+                "success": all(r.success for r in results.values()),
+                "results": results,
+                "execution_time": time.time() - context.start_time.timestamp(),
+                "context": context
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Workflow execution failed: {e}")
+            await self._emit_event(EventType.ERROR_OCCURRED, context, error=str(e))
+            raise
+    
+    async def _execute_step(self, step: WorkflowStep, context: WorkflowContext) -> AgentResult:
+        """Execute a single workflow step"""
+        self.logger.info(f"Executing step: {step.name}")
+        
+        # Check dependencies
+        for dep in step.dependencies:
+            if dep not in context.state:
+                return AgentResult(
+                    success=False,
+                    data={},
+                    error=f"Dependency {dep} not satisfied"
+                )
+        
+        # Get agent
+        agent = self.agents.get(step.agent_type)
+        if not agent:
+            return AgentResult(
+                success=False,
+                data={},
+                error=f"Agent {step.agent_type} not found"
+            )
+        
+        # Execute agent with retries
+        for attempt in range(step.retry_count):
+            try:
+                result = await agent.execute(context)
+                if result.success:
+                    return result
+                elif attempt < step.retry_count - 1:
+                    await asyncio.sleep(step.retry_delay)
+                    continue
+                else:
+                    return result
+            except Exception as e:
+                if attempt < step.retry_count - 1:
+                    await asyncio.sleep(step.retry_delay)
+                    continue
+                else:
+                    return AgentResult(
+                        success=False,
+                        data={},
+                        error=str(e)
+                    )
+        
+        return AgentResult(success=False, data={}, error="Max retries exceeded")
+    
+    async def _emit_event(self, event_type: EventType, context: WorkflowContext, **kwargs):
+        """Emit an event"""
+        event = {
+            "event_type": event_type,
+            "workflow_id": context.workflow_id,
+            "session_id": context.session_id,
+            "timestamp": datetime.now().isoformat(),
+            **kwargs
+        }
+        
+        context.events.append(event)
+        
+        # Call event handlers
+        handlers = self.event_handlers.get(event_type, [])
+        for handler in handlers:
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(event, context)
+                else:
+                    handler(event, context)
+            except Exception as e:
+                self.logger.error(f"Event handler failed: {e}")
+    
+    async def _log_query_received(self, event: Dict[str, Any], context: WorkflowContext):
+        """Log query received event"""
+        self.logger.info(f"Query received: {context.query[:100]}...")
+    
+    async def _log_workflow_complete(self, event: Dict[str, Any], context: WorkflowContext):
+        """Log workflow complete event"""
+        execution_time = time.time() - context.start_time.timestamp()
+        self.logger.info(f"Workflow completed in {execution_time:.2f}s")
+    
+    async def _log_error(self, event: Dict[str, Any], context: WorkflowContext):
+        """Log error event"""
+        error = event.get("error", "Unknown error")
+        self.logger.error(f"Workflow error: {error}")
+
+
+# Global workflow engine instance
+workflow_engine = WorkflowEngine() 

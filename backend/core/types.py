@@ -30,6 +30,12 @@ class ProcessingMode(str, Enum):
     FAST = "fast"
     BALANCED = "balanced"
     COMPREHENSIVE = "comprehensive"
+    SEMANTIC_FIRST = "semantic_first"
+    HYBRID = "hybrid"
+    TRADITIONAL = "traditional"
+    ADAPTIVE = "adaptive"
+    AGENTIC_WORKFLOW = "agentic_workflow"
+    FALLBACK = "fallback"
 
 
 class IntentType(str, Enum):

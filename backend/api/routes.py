@@ -19,6 +19,7 @@ from backend.core.sql_validator import SQLValidator
 from backend.core.types import ProcessingMode, QueryRequest, QueryResponse, SchemaInfo
 from backend.services.rag_service import EnhancedRAGService, get_rag_service
 from backend.services.enhanced_rag_service import EnhancedRAGService as SemanticRAGService
+from backend.services.agentic_rag_service import AgenticRAGService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -32,6 +33,19 @@ class FeedbackRequest(BaseModel):
     user_id: str
     session_id: str
     regenerate: bool = False
+
+
+# Global agentic RAG service instance
+_agentic_rag_service: Optional[AgenticRAGService] = None
+
+
+def get_agentic_rag_service() -> AgenticRAGService:
+    """Get or create agentic RAG service instance"""
+    global _agentic_rag_service
+    if _agentic_rag_service is None:
+        settings = get_settings()
+        _agentic_rag_service = AgenticRAGService(settings.database_path)
+    return _agentic_rag_service
 
 
 @router.get("/api/v1/health")
@@ -822,8 +836,12 @@ async def root():
         "endpoints": {
             "health": "/health",
             "ask": "/api/v1/ask",
+            "ask-enhanced": "/api/v1/ask-enhanced",
+            "ask-agentic": "/api/v1/ask-agentic",
             "schema": "/api/v1/schema",
             "validate_sql": "/api/v1/validate-sql",
+            "semantic/statistics": "/api/v1/semantic/statistics",
+            "agentic/statistics": "/api/v1/agentic/statistics",
         },
         "features": [
             "Enhanced SQL validation with parser-based checking",
@@ -831,5 +849,270 @@ async def root():
             "Candidate ranking for multiple SQL generation approaches",
             "Comprehensive error handling and logging",
             "Security validation for SQL queries",
+            "Semantic processing with vector search",
+            "Agentic workflows with specialized agents",
         ],
     }
+
+
+# ============================================================================
+# PHASE 2: AGENTIC WORKFLOW ENDPOINTS
+# ============================================================================
+
+@router.post("/api/v1/ask-agentic")
+async def ask_question_agentic(request: QueryRequest):
+    """
+    Process query using agentic workflow approach
+    Phase 2: Agentic Workflow Implementation
+    """
+    start_time = time.time()
+    
+    try:
+        # Validate request
+        if not request.question or len(request.question.strip()) == 0:
+            raise HTTPException(status_code=400, detail="Question cannot be empty")
+        
+        if len(request.question) > 1000:
+            raise HTTPException(
+                status_code=400, detail="Question too long (max 1000 characters)"
+            )
+        
+        # Get agentic RAG service
+        agentic_service = get_agentic_rag_service()
+        
+        # Process query using agentic workflow
+        result = await agentic_service.process_query_agentic(
+            request, 
+            workflow_id="standard_query_processing"
+        )
+        
+        # Build response
+        response_data = {
+            "success": result.query_response.success,
+            "sql": result.query_response.sql,
+            "data": result.query_response.data,
+            "visualization": result.query_response.visualization.model_dump() if result.query_response.visualization else None,
+            "explanation": result.query_response.explanation,
+            "confidence": result.query_response.confidence,
+            "execution_time": result.query_response.execution_time,
+            "session_id": result.query_response.session_id,
+            "processing_mode": "agentic_workflow",
+            "row_count": result.query_response.row_count,
+            
+            # Agentic-specific information
+            "workflow_id": result.workflow_context.workflow_id,
+            "agent_insights": result.agent_insights,
+            "recommendations": result.recommendations,
+            "processing_metrics": result.processing_metrics,
+            "workflow_events": len(result.workflow_context.events),
+            "workflow_errors": len(result.workflow_context.errors)
+        }
+        
+        # Add agent performance breakdown
+        agent_performance = {}
+        for step_id, agent_result in result.workflow_results.items():
+            agent_performance[step_id] = {
+                "success": agent_result.success,
+                "confidence": agent_result.confidence,
+                "execution_time": agent_result.execution_time,
+                "error": agent_result.error
+            }
+        response_data["agent_performance"] = agent_performance
+        
+        if result.query_response.success:
+            return response_data
+        else:
+            return JSONResponse(status_code=422, content=response_data)
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Agentic workflow failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Agentic workflow error: {str(e)}")
+
+
+@router.get("/api/v1/agentic/statistics")
+async def get_agentic_statistics():
+    """
+    Get comprehensive agentic workflow statistics
+    Phase 2: Agentic Workflow Implementation
+    """
+    try:
+        agentic_service = get_agentic_rag_service()
+        stats = agentic_service.get_service_statistics()
+        
+        return {
+            "success": True,
+            "statistics": stats,
+            "system_status": {
+                "agentic_engine": "ready",
+                "workflow_engine": "operational",
+                "event_driven_processing": "enabled",
+                "specialized_agents": "active"
+            },
+            "capabilities": {
+                "step_based_architecture": True,
+                "event_driven_processing": True,
+                "specialized_agents": True,
+                "workflow_orchestration": True,
+                "performance_monitoring": True,
+                "error_recovery": True
+            },
+            "phase": "Phase 2 - Agentic Workflow Implementation",
+            "version": "2.0.0"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get agentic statistics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get agentic statistics: {str(e)}")
+
+
+@router.get("/api/v1/agentic/workflows")
+async def get_available_workflows():
+    """
+    Get list of available agentic workflows
+    Phase 2: Agentic Workflow Implementation
+    """
+    try:
+        agentic_service = get_agentic_rag_service()
+        workflows = []
+        
+        for workflow_id, workflow in agentic_service.workflow_engine.workflows.items():
+            workflows.append({
+                "workflow_id": workflow_id,
+                "name": workflow.name,
+                "description": workflow.description,
+                "steps": [
+                    {
+                        "step_id": step.step_id,
+                        "name": step.name,
+                        "description": step.description,
+                        "dependencies": step.dependencies,
+                        "required": step.required
+                    }
+                    for step in workflow.steps
+                ],
+                "max_execution_time": workflow.max_execution_time,
+                "parallel_execution": workflow.parallel_execution
+            })
+        
+        return {
+            "success": True,
+            "workflows": workflows,
+            "total_workflows": len(workflows)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get workflows: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get workflows: {str(e)}")
+
+
+@router.get("/api/v1/agentic/workflows/{workflow_id}")
+async def get_workflow_status(workflow_id: str):
+    """
+    Get detailed status of a specific workflow
+    Phase 2: Agentic Workflow Implementation
+    """
+    try:
+        agentic_service = get_agentic_rag_service()
+        status = await agentic_service.get_workflow_status(workflow_id)
+        
+        if "error" in status:
+            raise HTTPException(status_code=404, detail=status["error"])
+        
+        return {
+            "success": True,
+            "workflow": status
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get workflow status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get workflow status: {str(e)}")
+
+
+@router.post("/api/v1/agentic/workflows/{workflow_id}/execute")
+async def execute_workflow(workflow_id: str, request: QueryRequest):
+    """
+    Execute a specific workflow with custom parameters
+    Phase 2: Agentic Workflow Implementation
+    """
+    start_time = time.time()
+    
+    try:
+        # Validate request
+        if not request.question or len(request.question.strip()) == 0:
+            raise HTTPException(status_code=400, detail="Question cannot be empty")
+        
+        # Get agentic RAG service
+        agentic_service = get_agentic_rag_service()
+        
+        # Check if workflow exists
+        if workflow_id not in agentic_service.workflow_engine.workflows:
+            raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+        
+        # Process query using specified workflow
+        result = await agentic_service.process_query_agentic(request, workflow_id)
+        
+        # Build response
+        response_data = {
+            "success": result.query_response.success,
+            "workflow_id": workflow_id,
+            "sql": result.query_response.sql,
+            "data": result.query_response.data,
+            "visualization": result.query_response.visualization.model_dump() if result.query_response.visualization else None,
+            "explanation": result.query_response.explanation,
+            "confidence": result.query_response.confidence,
+            "execution_time": result.query_response.execution_time,
+            "session_id": result.query_response.session_id,
+            "processing_mode": "agentic_workflow",
+            "row_count": result.query_response.row_count,
+            
+            # Workflow-specific information
+            "agent_insights": result.agent_insights,
+            "recommendations": result.recommendations,
+            "processing_metrics": result.processing_metrics,
+            "workflow_events": len(result.workflow_context.events),
+            "workflow_errors": len(result.workflow_context.errors)
+        }
+        
+        if result.query_response.success:
+            return response_data
+        else:
+            return JSONResponse(status_code=422, content=response_data)
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Workflow execution failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Workflow execution error: {str(e)}")
+
+
+@router.get("/api/v1/agentic/agents")
+async def get_available_agents():
+    """
+    Get list of available specialized agents
+    Phase 2: Agentic Workflow Implementation
+    """
+    try:
+        agentic_service = get_agentic_rag_service()
+        agents = []
+        
+        for agent_type, agent in agentic_service.workflow_engine.agents.items():
+            agents.append({
+                "agent_type": agent_type.value,
+                "name": agent.name,
+                "description": f"Specialized agent for {agent_type.value.replace('_', ' ')}",
+                "capabilities": agent.get_required_context()
+            })
+        
+        return {
+            "success": True,
+            "agents": agents,
+            "total_agents": len(agents)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get agents: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get agents: {str(e)}")
