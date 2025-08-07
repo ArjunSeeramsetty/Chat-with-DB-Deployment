@@ -2305,3 +2305,64 @@ class SQLAssembler:
                 return f"WHERE {source_filter}"
 
         return where_clause
+
+    def _generate_fallback_sql(self, query: str) -> str:
+        """Generate basic SQL using keywords when templates don't match"""
+        query_lower = query.lower()
+        
+        # Determine energy column based on query keywords
+        energy_column = self._determine_energy_column(query_lower)
+        
+        # Check for growth queries
+        if any(word in query_lower for word in ['growth', 'monthly growth', 'increase']):
+            return self._generate_growth_fallback_sql(query_lower, energy_column)
+        
+        # Check for state queries
+        if any(word in query_lower for word in ['state', 'states']):
+            return self._generate_state_fallback_sql(query_lower, energy_column)
+        
+        # Check for region queries
+        if any(word in query_lower for word in ['region', 'regions']):
+            return self._generate_region_fallback_sql(query_lower, energy_column)
+        
+        # Default query
+        return f"""
+        SELECT 
+            SUM({energy_column}) as TotalEnergy
+        FROM FactAllIndiaDailySummary f
+        JOIN DimDates d ON f.DateID = d.DateID
+        WHERE strftime('%Y', d.Date) = '2024'
+        """
+    
+    def _generate_growth_fallback_sql(self, query_lower: str, energy_column: str) -> str:
+        """Generate SQLite-friendly growth SQL using self-joins"""
+        return f"""
+        SELECT 
+            r.RegionName,
+            strftime('%Y-%m', d.Date) as Month,
+            SUM(fs.{energy_column}) as TotalEnergy,
+            prev.PreviousMonthEnergy,
+            CASE 
+                WHEN prev.PreviousMonthEnergy > 0 
+                THEN ((SUM(fs.{energy_column}) - prev.PreviousMonthEnergy) / prev.PreviousMonthEnergy) * 100 
+                ELSE 0 
+            END as GrowthRate
+        FROM FactAllIndiaDailySummary fs
+        JOIN DimRegions r ON fs.RegionID = r.RegionID
+        JOIN DimDates d ON fs.DateID = d.DateID
+        LEFT JOIN (
+            SELECT 
+                r2.RegionName,
+                strftime('%Y-%m', d2.Date) as Month,
+                SUM(fs2.{energy_column}) as PreviousMonthEnergy
+            FROM FactAllIndiaDailySummary fs2
+            JOIN DimRegions r2 ON fs2.RegionID = r2.RegionID
+            JOIN DimDates d2 ON fs2.DateID = d2.DateID
+            WHERE strftime('%Y', d2.Date) = '2024'
+            GROUP BY r2.RegionName, strftime('%Y-%m', d2.Date)
+        ) prev ON r.RegionName = prev.RegionName 
+            AND strftime('%Y-%m', d.Date) = date(prev.Month || '-01', '+1 month')
+        WHERE strftime('%Y', d.Date) = '2024'
+        GROUP BY r.RegionName, strftime('%Y-%m', d.Date)
+        ORDER BY r.RegionName, Month
+        """

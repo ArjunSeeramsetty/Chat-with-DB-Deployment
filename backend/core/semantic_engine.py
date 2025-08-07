@@ -5,7 +5,7 @@ Implements advanced semantic understanding with vector search and context awaren
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Union
 from dataclasses import dataclass
 from enum import Enum
 import json
@@ -346,53 +346,56 @@ class SemanticEngine:
             )
             
     async def _llm_semantic_analysis(self, query: str, schema_results: List, pattern_results: List) -> Dict[str, Any]:
-        """Use LLM for deep semantic analysis"""
-        
-        # Prepare context from vector search results
-        schema_context = "\n".join([
-            f"- {r.payload['name']}: {r.payload.get('description', '')}" 
-            for r in schema_results
-        ])
-        
-        pattern_context = "\n".join([
-            f"- {r.payload['pattern']} (category: {r.payload['category']})"
-            for r in pattern_results
-        ])
-        
-        prompt = f"""
-        Analyze the following natural language query for semantic understanding:
-        
-        Query: "{query}"
-        
-        Relevant Schema Context:
-        {schema_context}
-        
-        Similar Query Patterns:
-        {pattern_context}
-        
-        Provide a JSON analysis with:
-        1. intent_type: "data_retrieval", "trend_analysis", "comparison", "aggregation"
-        2. business_domain: specific area (e.g., "energy_generation", "consumption_analysis")
-        3. key_entities: important business entities mentioned
-        4. temporal_indicators: time-related terms
-        5. metric_indicators: measurement or calculation terms
-        6. confidence_factors: factors that increase/decrease confidence
-        
-        Return only valid JSON:
-        """
-        
+        """Use LLM for semantic analysis"""
         try:
-            response = await self.llm_provider.generate_text(prompt)
-            return json.loads(response.strip())
+            prompt = f"""
+            Analyze the following natural language query for semantic understanding:
+            
+            Query: "{query}"
+            
+            Available schema information:
+            {json.dumps(schema_results, indent=2)}
+            
+            Query patterns found:
+            {json.dumps(pattern_results, indent=2)}
+            
+            Provide analysis in JSON format with:
+            - intent: (aggregation, filtering, time_series, comparison, growth)
+            - confidence: (0.0-1.0)
+            - business_entities: [list of business concepts]
+            - domain_concepts: [list of domain-specific terms]
+            - temporal_context: {{"time_period": "monthly", "year": 2024}}
+            - relationships: [list of table relationships needed]
+            
+            Return only valid JSON:
+            """
+            
+            response = await self.llm_provider.generate(prompt)
+            response_text = response.content if hasattr(response, 'content') else str(response)
+            
+            # Parse JSON response
+            try:
+                return json.loads(response_text.strip())
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse LLM response as JSON, using fallback")
+                return {
+                    "intent": "aggregation",
+                    "confidence": 0.5,
+                    "business_entities": [],
+                    "domain_concepts": [],
+                    "temporal_context": None,
+                    "relationships": []
+                }
+                
         except Exception as e:
             logger.error(f"LLM semantic analysis failed: {e}")
             return {
-                "intent_type": "data_retrieval",
-                "business_domain": "general",
-                "key_entities": [],
-                "temporal_indicators": [],
-                "metric_indicators": [],
-                "confidence_factors": []
+                "intent": "aggregation",
+                "confidence": 0.3,
+                "business_entities": [],
+                "domain_concepts": [],
+                "temporal_context": None,
+                "relationships": []
             }
             
     def _extract_business_entities(self, query: str, schema_results: List) -> List[Dict[str, Any]]:
@@ -464,7 +467,7 @@ class SemanticEngine:
             "aggregation": IntentType.DATA_RETRIEVAL
         }
         
-        intent_str = llm_analysis.get('intent_type', 'data_retrieval')
+        intent_str = llm_analysis.get('intent', 'data_retrieval')
         return intent_mapping.get(intent_str, IntentType.DATA_RETRIEVAL)
         
     def _extract_domain_concepts(self, llm_analysis: Dict) -> List[str]:
@@ -593,39 +596,57 @@ class SemanticEngine:
     async def generate_contextual_sql(
         self, 
         natural_language_query: str, 
-        semantic_context: SemanticContext, 
+        semantic_context: Union[SemanticContext, Dict], 
         schema_context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Generate SQL with full semantic context"""
         
-        # Prepare comprehensive context for SQL generation
-        generation_context = {
-            "query": natural_language_query,
-            "intent": semantic_context.intent.value,
-            "confidence": semantic_context.confidence,
-            "semantic_mappings": semantic_context.semantic_mappings,
-            "business_entities": semantic_context.business_entities,
-            "temporal_context": semantic_context.temporal_context,
-            "primary_table": schema_context.get("primary_table"),
-            "relationships": schema_context.get("relationships", []),
-            "domain_concepts": semantic_context.domain_concepts
-        }
+        # Handle both SemanticContext object and dictionary
+        if isinstance(semantic_context, SemanticContext):
+            # Use SemanticContext object directly
+            generation_context = {
+                "query": natural_language_query,
+                "intent": semantic_context.intent.value,
+                "confidence": semantic_context.confidence,
+                "semantic_mappings": semantic_context.semantic_mappings,
+                "business_entities": semantic_context.business_entities,
+                "temporal_context": semantic_context.temporal_context,
+                "primary_table": schema_context.get("primary_table"),
+                "relationships": schema_context.get("relationships", []),
+                "domain_concepts": semantic_context.domain_concepts
+            }
+            confidence = semantic_context.confidence
+        else:
+            # Handle dictionary case
+            generation_context = {
+                "query": natural_language_query,
+                "intent": semantic_context.get("intent", "aggregation"),
+                "confidence": semantic_context.get("confidence", 0.5),
+                "semantic_mappings": semantic_context.get("semantic_mappings", {}),
+                "business_entities": semantic_context.get("business_entities", []),
+                "temporal_context": semantic_context.get("temporal_context", {}),
+                "primary_table": schema_context.get("primary_table"),
+                "relationships": schema_context.get("relationships", []),
+                "domain_concepts": semantic_context.get("domain_concepts", [])
+            }
+            confidence = semantic_context.get("confidence", 0.5)
         
         # Use LLM for contextual SQL generation
         sql_prompt = self._build_sql_generation_prompt(generation_context)
         
         try:
-            sql_response = await self.llm_provider.generate_text(sql_prompt)
+            sql_response = await self.llm_provider.generate(sql_prompt)
+            response_text = sql_response.content if hasattr(sql_response, 'content') else str(sql_response)
             
             # Parse and validate SQL response
-            sql_result = self._parse_sql_response(sql_response)
+            sql_result = self._parse_sql_response(response_text)
             
             return {
                 "sql": sql_result.get("sql", ""),
                 "explanation": sql_result.get("explanation", ""),
-                "confidence": semantic_context.confidence,
+                "confidence": confidence,
                 "context_used": generation_context,
-                "semantic_mappings": semantic_context.semantic_mappings
+                "semantic_mappings": generation_context.get("semantic_mappings", {})
             }
             
         except Exception as e:
@@ -644,7 +665,7 @@ class SemanticEngine:
         table_info = primary_table["info"] if primary_table else {}
         
         prompt = f"""
-        Generate SQL query based on semantic analysis:
+        Generate a complete SQLite-compatible SQL query based on semantic analysis:
         
         Natural Language Query: "{context['query']}"
         
@@ -666,21 +687,82 @@ class SemanticEngine:
         
         Domain Concepts: {', '.join(context['domain_concepts'])}
         
-        Generate SQL that:
-        1. Uses the most relevant table and columns
-        2. Applies appropriate joins based on relationships
-        3. Includes proper temporal filtering if needed
-        4. Uses semantic mappings for column selection
-        5. Applies business logic understanding
+        IMPORTANT REQUIREMENTS:
+        1. Generate a COMPLETE SQL query starting with SELECT
+        2. Use SQLite-compatible syntax only
+        3. Use strftime() for date functions (e.g., strftime('%Y-%m', d.ActualDate))
+        4. Avoid window functions (LAG, LEAD, ROW_NUMBER) - use subqueries instead
+        5. Use self-joins for growth calculations
+        6. Use proper table aliases (f for fact tables, d for dimension tables)
+        7. Use SUM(), AVG(), MAX(), MIN() for aggregations
+        8. Use GROUP BY for grouping
+        9. Use ORDER BY for sorting
+        10. Include all necessary JOINs, WHERE clauses, and GROUP BY
         
-        Return JSON with:
-        {{
-            "sql": "generated SQL query",
-            "explanation": "explanation of the query logic",
-            "tables_used": ["list of tables"],
-            "columns_used": ["list of columns"],
-            "business_logic": "business reasoning applied"
-        }}
+        For growth calculations, use this exact pattern:
+        - Use LEFT JOIN with a subquery to get previous month data
+        - Calculate growth as: ((current - previous) / previous) * 100
+        - Use CASE statements to handle division by zero
+        
+        Example structure for monthly growth:
+        SELECT 
+            r.RegionName,
+            strftime('%Y-%m', d.ActualDate) as Month,
+            SUM(fs.EnergyMet) as TotalEnergyMet,
+            prev.PreviousMonthEnergy,
+            CASE 
+                WHEN prev.PreviousMonthEnergy > 0 
+                THEN ((SUM(fs.EnergyMet) - prev.PreviousMonthEnergy) / prev.PreviousMonthEnergy) * 100 
+                ELSE 0 
+            END as GrowthRate
+        FROM FactAllIndiaDailySummary fs
+        JOIN DimRegions r ON fs.RegionID = r.RegionID
+        JOIN DimDates d ON fs.DateID = d.DateID
+        LEFT JOIN (
+            SELECT 
+                r2.RegionName,
+                strftime('%Y-%m', d2.ActualDate) as Month,
+                SUM(fs2.EnergyMet) as PreviousMonthEnergy
+            FROM FactAllIndiaDailySummary fs2
+            JOIN DimRegions r2 ON fs2.RegionID = r2.RegionID
+            JOIN DimDates d2 ON fs2.DateID = d2.DateID
+            WHERE strftime('%Y', d2.ActualDate) = '2024'
+            GROUP BY r2.RegionName, strftime('%Y-%m', d2.ActualDate)
+        ) prev ON r.RegionName = prev.RegionName 
+            AND strftime('%Y-%m', d.ActualDate) = date(prev.Month || '-01', '+1 month')
+        WHERE strftime('%Y', d.ActualDate) = '2024'
+        GROUP BY r.RegionName, strftime('%Y-%m', d.ActualDate)
+        ORDER BY r.RegionName, Month
+        
+        CRITICAL: Use the exact table names and column names from the schema:
+        - FactAllIndiaDailySummary (alias: fs) - contains EnergyMet column
+        - DimRegions (alias: r) - contains RegionName column  
+        - DimDates (alias: d) - contains ActualDate column (NOT Date)
+        - Use fs.EnergyMet for energy metrics
+        - Use r.RegionName for region names
+        - Use d.ActualDate for dates (NOT d.Date)
+        - Use fs.RegionID for joining with DimRegions
+        - Use fs.DateID for joining with DimDates
+        - Use fs2.RegionID and fs2.DateID for subquery joins
+        
+        IMPORTANT: All JOINs must use the correct foreign key relationships:
+        - JOIN DimRegions r ON fs.RegionID = r.RegionID
+        - JOIN DimDates d ON fs.DateID = d.DateID
+        - In subqueries: JOIN DimRegions r2 ON fs2.RegionID = r2.RegionID
+        - In subqueries: JOIN DimDates d2 ON fs2.DateID = d2.DateID
+        
+        Generate a complete SQL query that:
+        1. Starts with SELECT and includes all necessary clauses
+        2. Uses the most relevant table and columns
+        3. Applies appropriate joins based on relationships
+        4. Includes proper temporal filtering if needed
+        5. Uses semantic mappings for column selection
+        6. Applies business logic understanding
+        7. Uses SQLite-compatible syntax only
+        8. Is complete and executable
+        9. Uses the exact table and column names specified above
+        
+        Return only the SQL query without any explanation, formatting, or code blocks:
         """
         
         return prompt
@@ -692,22 +774,127 @@ class SemanticEngine:
             return json.loads(response.strip())
         except json.JSONDecodeError:
             # Fallback: extract SQL from text response
-            lines = response.strip().split('\n')
-            sql_lines = []
-            in_sql = False
+            sql = self._extract_sql_from_text(response)
             
-            for line in lines:
-                if 'SELECT' in line.upper():
-                    in_sql = True
-                if in_sql:
-                    sql_lines.append(line)
-                if line.strip().endswith(';'):
-                    break
-                    
             return {
-                "sql": '\n'.join(sql_lines),
+                "sql": sql,
                 "explanation": "Generated from text response",
                 "tables_used": [],
                 "columns_used": [],
                 "business_logic": "Basic extraction"
             }
+    
+    def _extract_sql_from_text(self, text: str) -> str:
+        """Extract SQL from text response with multiple fallback strategies"""
+        # Strategy 1: Look for SQL code blocks
+        sql_blocks = []
+        
+        # Find ```sql blocks
+        start_markers = ["```sql", "```SQL", "```"]
+        end_markers = ["```"]
+        
+        for start_marker in start_markers:
+            start_idx = text.find(start_marker)
+            if start_idx != -1:
+                start_pos = start_idx + len(start_marker)
+                # Find the end marker
+                for end_marker in end_markers:
+                    end_idx = text.find(end_marker, start_pos)
+                    if end_idx != -1:
+                        sql_block = text[start_pos:end_idx].strip()
+                        if sql_block and ('SELECT' in sql_block.upper() or 'FROM' in sql_block.upper()):
+                            sql_blocks.append(sql_block)
+                        break
+        
+        # Strategy 2: Look for SQL after "Return only the SQL query:"
+        if "Return only the SQL query:" in text:
+            parts = text.split("Return only the SQL query:")
+            if len(parts) > 1:
+                sql_part = parts[1].strip()
+                # Extract until the next newline or end
+                lines = sql_part.split('\n')
+                sql_lines = []
+                for line in lines:
+                    if line.strip() and ('SELECT' in line.upper() or 'FROM' in line.upper() or line.strip().startswith('--')):
+                        sql_lines.append(line)
+                    elif sql_lines and line.strip():
+                        sql_lines.append(line)
+                    elif sql_lines and not line.strip():
+                        break
+                if sql_lines:
+                    sql_blocks.append('\n'.join(sql_lines))
+        
+        # Strategy 3: Extract lines that look like SQL (improved)
+        lines = text.split('\n')
+        sql_lines = []
+        in_sql = False
+        sql_started = False
+        
+        for line in lines:
+            line_upper = line.upper().strip()
+            line_stripped = line.strip()
+            
+            # Check if this line starts SQL
+            if 'SELECT' in line_upper and not sql_started:
+                in_sql = True
+                sql_started = True
+            elif in_sql and line_upper.startswith(('SELECT', 'FROM', 'JOIN', 'WHERE', 'GROUP BY', 'ORDER BY', 'HAVING', 'UNION', 'WITH')):
+                in_sql = True
+            elif in_sql and line_stripped and not line_stripped.startswith('--'):
+                # Continue if it looks like SQL (has keywords or is part of a statement)
+                if any(keyword in line_upper for keyword in ['SELECT', 'FROM', 'JOIN', 'WHERE', 'GROUP', 'ORDER', 'HAVING', 'UNION', 'WITH', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'AS', 'ON', 'AND', 'OR', 'IN', 'LIKE', 'BETWEEN', 'IS', 'NULL', 'NOT', 'DISTINCT', 'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'STRFTIME', 'DATE', 'LEFT', 'RIGHT', 'INNER', 'OUTER']):
+                    in_sql = True
+                elif line_stripped.endswith(';') or line_stripped.endswith(','):
+                    in_sql = True
+                elif any(char in line_stripped for char in ['(', ')', '=', '>', '<', '+', '-', '*', '/', '||']):
+                    in_sql = True
+                elif line_stripped.startswith(('AND', 'OR', 'ON', 'IN', 'LIKE', 'BETWEEN')):
+                    in_sql = True
+                else:
+                    # Check if this might be the end of SQL
+                    if not any(char in line_stripped for char in ['(', ')', '=', '>', '<', '+', '-', '*', '/', '||', ',', ';']):
+                        # If we have a substantial SQL block, continue; otherwise stop
+                        if len(sql_lines) < 3:
+                            in_sql = False
+                        elif not any(keyword in line_upper for keyword in ['SELECT', 'FROM', 'JOIN', 'WHERE', 'GROUP', 'ORDER', 'HAVING', 'UNION', 'WITH', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'AS', 'ON', 'AND', 'OR', 'IN', 'LIKE', 'BETWEEN', 'IS', 'NULL', 'NOT', 'DISTINCT', 'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'STRFTIME', 'DATE', 'LEFT', 'RIGHT', 'INNER', 'OUTER']):
+                            in_sql = False
+            
+            if in_sql:
+                sql_lines.append(line)
+        
+        if sql_lines:
+            sql_blocks.append('\n'.join(sql_lines))
+        
+        # Return the best SQL block found
+        if sql_blocks:
+            # Prefer the longest SQL block that starts with SELECT
+            valid_blocks = [block for block in sql_blocks if block.strip().upper().startswith('SELECT')]
+            if valid_blocks:
+                return max(valid_blocks, key=len)
+            else:
+                # If no block starts with SELECT, return the longest one
+                return max(sql_blocks, key=len)
+        
+        # Strategy 4: Last resort - extract anything that looks like SQL
+        words = text.split()
+        sql_words = []
+        in_sql = False
+        
+        for i, word in enumerate(words):
+            word_upper = word.upper()
+            if 'SELECT' in word_upper:
+                in_sql = True
+            elif in_sql and word_upper in ['FROM', 'JOIN', 'WHERE', 'GROUP', 'ORDER', 'HAVING', 'UNION', 'WITH']:
+                in_sql = True
+            elif in_sql and word.strip().endswith(';'):
+                sql_words.append(word)
+                break
+            
+            if in_sql:
+                sql_words.append(word)
+        
+        if sql_words:
+            return ' '.join(sql_words)
+        
+        # If all else fails, return empty string
+        return ""

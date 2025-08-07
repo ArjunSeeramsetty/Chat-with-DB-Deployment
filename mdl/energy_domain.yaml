@@ -1,0 +1,184 @@
+# Energy Domain MDL Schema
+# Wren AI Modeling Definition Language
+
+version: "1.0"
+domain: "energy"
+description: "Energy sector data model for Indian power system"
+
+# Models (tables with business semantics)
+models:
+  FactAllIndiaDailySummary:
+    description: "Daily energy summary at national level"
+    grain: "daily_region"
+    columns:
+      RegionID:
+        type: "integer"
+        description: "Region identifier"
+        primary_key: false
+      DateID:
+        type: "integer"
+        description: "Date identifier"
+        primary_key: false
+      EnergyMet:
+        type: "decimal"
+        description: "Energy met in MWh"
+        business_metric: true
+      EnergyRequirement:
+        type: "decimal"
+        description: "Energy requirement in MWh"
+        business_metric: true
+      Surplus:
+        type: "decimal"
+        description: "Energy surplus in MWh"
+        business_metric: true
+      Deficit:
+        type: "decimal"
+        description: "Energy deficit in MWh"
+        business_metric: true
+    metadata:
+      business_name: "National Energy Summary"
+      data_source: "Power System Operation Corporation"
+      update_frequency: "daily"
+
+  FactStateDailyEnergy:
+    description: "Daily energy data by state"
+    grain: "daily_state"
+    columns:
+      StateID:
+        type: "integer"
+        description: "State identifier"
+        primary_key: false
+      DateID:
+        type: "integer"
+        description: "Date identifier"
+        primary_key: false
+      EnergyMet:
+        type: "decimal"
+        description: "Energy met in MWh"
+        business_metric: true
+      EnergyConsumption:
+        type: "decimal"
+        description: "Energy consumption in MWh"
+        business_metric: true
+      PeakDemand:
+        type: "decimal"
+        description: "Peak demand in MW"
+        business_metric: true
+    metadata:
+      business_name: "State Energy Data"
+      data_source: "State Load Dispatch Centers"
+      update_frequency: "daily"
+
+  FactDailyGenerationBreakdown:
+    description: "Daily energy generation by source type"
+    grain: "daily_source_state"
+    columns:
+      GenerationSourceID:
+        type: "integer"
+        description: "Generation source identifier"
+        primary_key: false
+      StateID:
+        type: "integer"
+        description: "State identifier"
+        primary_key: false
+      DateID:
+        type: "integer"
+        description: "Date identifier"
+        primary_key: false
+      GenerationAmount:
+        type: "decimal"
+        description: "Generation amount in MWh"
+        business_metric: true
+      Capacity:
+        type: "decimal"
+        description: "Installed capacity in MW"
+        business_metric: true
+      PLF:
+        type: "decimal"
+        description: "Plant Load Factor percentage"
+        business_metric: true
+    metadata:
+      business_name: "Generation Source Breakdown"
+      data_source: "Central Electricity Authority"
+      update_frequency: "daily"
+
+# Relationships between models
+relationships:
+  - source: "FactAllIndiaDailySummary"
+    target: "DimRegions"
+    type: "many_to_one"
+    conditions:
+      - "f.RegionID = d.RegionID"
+    business_meaning: "Each daily summary belongs to a specific region"
+    cardinality: "many"
+    required: true
+
+  - source: "FactStateDailyEnergy"
+    target: "DimStates"
+    type: "many_to_one"
+    conditions:
+      - "f.StateID = d.StateID"
+    business_meaning: "Each state energy record belongs to a specific state"
+    cardinality: "many"
+    required: true
+
+  - source: "FactDailyGenerationBreakdown"
+    target: "DimGenerationSources"
+    type: "many_to_one"
+    conditions:
+      - "f.GenerationSourceID = gs.GenerationSourceID"
+    business_meaning: "Each generation record belongs to a specific source type"
+    cardinality: "many"
+    required: true
+
+  - source: "FactDailyGenerationBreakdown"
+    target: "DimStates"
+    type: "many_to_one"
+    conditions:
+      - "f.StateID = d.StateID"
+    business_meaning: "Each generation record belongs to a specific state"
+    cardinality: "many"
+    required: true
+
+# Business metrics and calculations
+metrics:
+  growth_rate:
+    description: "Period-over-period percentage change"
+    calculation: "((current - previous) / previous) * 100"
+    unit: "percentage"
+    business_meaning: "Growth rate calculation for trend analysis"
+
+  capacity_utilization:
+    description: "Efficiency of power plant utilization"
+    calculation: "generation / installed_capacity"
+    unit: "percentage"
+    business_meaning: "Capacity utilization percentage"
+
+  energy_efficiency:
+    description: "Energy efficiency ratio"
+    calculation: "energy_met / energy_requirement"
+    unit: "ratio"
+    business_meaning: "Energy efficiency measurement"
+
+# Business glossary
+business_glossary:
+  energy_met: "Total energy supplied to meet demand"
+  energy_requirement: "Total energy demand/requirement"
+  surplus: "Excess energy available beyond requirement"
+  deficit: "Shortfall in energy supply compared to requirement"
+  plf: "Plant Load Factor - capacity utilization percentage"
+  peak_demand: "Maximum energy demand in a day"
+  generation: "Energy production from various sources"
+  renewable: "Energy from solar, wind, hydro sources"
+  thermal: "Energy from coal, gas, nuclear sources"
+  transmission: "Energy transmission through power lines"
+  distribution: "Energy distribution to end consumers"
+
+# Semantic mappings
+semantic_mappings:
+  energy_consumption: "EnergyMet"
+  energy_demand: "EnergyRequirement"
+  energy_supply: "EnergyMet"
+  power_generation: "GenerationAmount"
+  capacity_factor: "PLF"
+  peak_power: "PeakDemand" 

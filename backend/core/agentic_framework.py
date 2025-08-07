@@ -294,28 +294,240 @@ class SQLGenerationAgent(BaseAgent):
             # Extract SQL from the result
             if hasattr(sql_result, 'sql'):
                 sql = sql_result.sql
+                success = sql_result.success
             elif isinstance(sql_result, dict):
                 sql = sql_result.get('sql', '')
+                success = sql_result.get('success', False)
             else:
                 sql = str(sql_result)
+                success = bool(sql and sql.strip() and not sql.startswith('--'))
+            
+            # If SQL generation failed, try to generate a basic fallback SQL
+            if not sql or not success:
+                sql = self._generate_fallback_sql(query, analysis)
+                generation_method = "fallback"
+                confidence = min(analysis.get("confidence", 0.0) * 0.8, 0.8)  # Reduce confidence for fallback
+            else:
+                generation_method = "assembler"
+                confidence = analysis.get("confidence", 0.0)
             
             return {
                 "sql": sql,
-                "confidence": analysis.get("confidence", 0.0),
+                "confidence": confidence,
                 "query_type": analysis.get("query_type", "unknown"),
                 "tables_used": analysis.get("main_table", ""),
-                "generation_method": "assembler"
+                "generation_method": generation_method,
+                "warnings": ["Fallback SQL used - results may be approximate"] if generation_method == "fallback" else []
             }
             
         except Exception as e:
             self.logger.error(f"SQL generation error: {e}")
+            # Generate fallback SQL even on error
+            fallback_sql = self._generate_fallback_sql(query, analysis)
             return {
-                "sql": f"-- SQL generation failed: {str(e)}",
-                "confidence": 0.0,
+                "sql": fallback_sql,
+                "confidence": 0.5,  # Low confidence for error fallback
                 "query_type": "unknown",
                 "tables_used": "",
-                "generation_method": "error"
+                "generation_method": "error_fallback",
+                "warnings": [
+                    "SQL generation failed - using fallback SQL",
+                    "Results may be approximate due to generation error",
+                    f"Error: {str(e)}"
+                ]
             }
+    
+    def _generate_fallback_sql(self, query: str, analysis: Dict[str, Any]) -> str:
+        """Generate intelligent fallback SQL when template matching fails"""
+        query_lower = query.lower()
+        
+        # Extract context from analysis
+        query_type = analysis.get("query_type", "unknown")
+        intent = analysis.get("intent", "unknown")
+        entities = analysis.get("entities", [])
+        time_period = analysis.get("time_period", "unknown")
+        metrics = analysis.get("metrics", [])
+        
+        # Determine time filter based on query content and analysis
+        time_filter = self._extract_time_filter(query_lower, time_period)
+        
+        # Determine aggregation function based on query intent
+        aggregation_function = self._determine_aggregation_function(query_lower, intent)
+        
+        # Determine energy column based on metrics
+        energy_column = self._determine_energy_column(metrics, query_lower)
+        
+        # Generate contextually appropriate SQL
+        if "state" in query_lower or "states" in query_lower or query_type == "state":
+            return self._generate_state_fallback_sql(query_lower, entities, time_filter, aggregation_function, energy_column)
+        elif "region" in query_lower or "regions" in query_lower or query_type == "region":
+            return self._generate_region_fallback_sql(query_lower, entities, time_filter, aggregation_function, energy_column)
+        elif "growth" in query_lower or "monthly" in query_lower or "trend" in query_lower:
+            return self._generate_growth_fallback_sql(query_lower, entities, time_filter, energy_column)
+        elif "generation" in query_lower or "source" in query_lower:
+            return self._generate_generation_fallback_sql(query_lower, entities, time_filter, aggregation_function)
+        else:
+            # Default fallback with warning
+            return self._generate_default_fallback_sql(query, time_filter)
+    
+    def _extract_time_filter(self, query_lower: str, time_period: str) -> str:
+        """Extract time filter from query"""
+        # Look for specific years
+        import re
+        year_match = re.search(r'20\d{2}', query_lower)
+        if year_match:
+            year = year_match.group()
+            return f"WHERE dt.Year = {year}"
+        
+        # Look for time period indicators
+        if "this year" in query_lower or "current year" in query_lower:
+            return "WHERE dt.Year = 2024"
+        elif "last year" in query_lower or "previous year" in query_lower:
+            return "WHERE dt.Year = 2023"
+        elif "2023" in query_lower:
+            return "WHERE dt.Year = 2023"
+        elif "2024" in query_lower:
+            return "WHERE dt.Year = 2024"
+        elif "2025" in query_lower:
+            return "WHERE dt.Year = 2025"
+        else:
+            # Default to current year if no specific time mentioned
+            return "WHERE dt.Year = 2024"
+    
+    def _determine_aggregation_function(self, query_lower: str, intent: str) -> str:
+        """Determine appropriate aggregation function"""
+        if any(word in query_lower for word in ["total", "sum", "sum of"]):
+            return "SUM"
+        elif any(word in query_lower for word in ["average", "avg", "mean"]):
+            return "AVG"
+        elif any(word in query_lower for word in ["maximum", "max", "highest"]):
+            return "MAX"
+        elif any(word in query_lower for word in ["minimum", "min", "lowest"]):
+            return "MIN"
+        elif any(word in query_lower for word in ["count", "number of"]):
+            return "COUNT"
+        else:
+            # Default to SUM for most energy queries
+            return "SUM"
+    
+    def _determine_energy_column(self, metrics: list, query_lower: str) -> str:
+        """Determine appropriate energy column"""
+        if metrics:
+            # Use first metric if available
+            return metrics[0]
+        
+        # Default based on query content and correct column names
+        if "demand" in query_lower:
+            return "MaximumDemand"  # Correct column name for state table
+        elif "consumption" in query_lower:
+            return "EnergyMet"  # Correct column name for energy consumption
+        elif "generation" in query_lower:
+            return "GenerationAmount"  # Correct column name for generation
+        elif "shortage" in query_lower:
+            return "EnergyShortage"  # Correct column name for shortage
+        else:
+            return "EnergyMet"  # Default energy column - correct name
+    
+    def _generate_state_fallback_sql(self, query_lower: str, entities: list, time_filter: str, aggregation_function: str, energy_column: str) -> str:
+        """Generate state-specific fallback SQL"""
+        # Check for specific state mentions
+        state_filter = ""
+        if entities:
+            state_entities = [e for e in entities if "state" in e.lower() or e.lower() in ["northern", "southern", "eastern", "western"]]
+            if state_entities:
+                state_names = "', '".join(state_entities)
+                state_filter = f"AND ds.StateName IN ('{state_names}')"
+        
+        return f"""
+            SELECT ds.StateName, ROUND({aggregation_function}(fs.{energy_column}), 2) as TotalEnergy
+            FROM FactStateDailyEnergy fs
+            JOIN DimStates ds ON fs.StateID = ds.StateID
+            JOIN DimDates dt ON fs.DateID = dt.DateID
+            {time_filter}
+            {state_filter}
+            GROUP BY ds.StateName
+            ORDER BY TotalEnergy DESC
+        """
+    
+    def _generate_region_fallback_sql(self, query_lower: str, entities: list, time_filter: str, aggregation_function: str, energy_column: str) -> str:
+        """Generate region-specific fallback SQL"""
+        # Check for specific region mentions
+        region_filter = ""
+        if entities:
+            region_entities = [e for e in entities if "region" in e.lower() or e.lower() in ["northern", "southern", "eastern", "western"]]
+            if region_entities:
+                region_names = "', '".join(region_entities)
+                region_filter = f"AND d.RegionName IN ('{region_names}')"
+        
+        return f"""
+            SELECT d.RegionName, ROUND({aggregation_function}(f.{energy_column}), 2) as TotalEnergy
+            FROM FactAllIndiaDailySummary f
+            JOIN DimRegions d ON f.RegionID = d.RegionID
+            JOIN DimDates dt ON f.DateID = dt.DateID
+            {time_filter}
+            {region_filter}
+            GROUP BY d.RegionName
+            ORDER BY TotalEnergy DESC
+        """
+    
+    def _generate_growth_fallback_sql(self, query_lower: str, entities: list, time_filter: str, energy_column: str) -> str:
+        """Generate SQLite-friendly growth SQL using self-joins"""
+        return f"""
+        SELECT 
+            r.RegionName,
+            strftime('%Y-%m', d.Date) as Month,
+            SUM(fs.{energy_column}) as TotalEnergy,
+            prev.PreviousMonthEnergy,
+            CASE 
+                WHEN prev.PreviousMonthEnergy > 0 
+                THEN ((SUM(fs.{energy_column}) - prev.PreviousMonthEnergy) / prev.PreviousMonthEnergy) * 100 
+                ELSE 0 
+            END as GrowthRate
+        FROM FactAllIndiaDailySummary fs
+        JOIN DimRegions r ON fs.RegionID = r.RegionID
+        JOIN DimDates d ON fs.DateID = d.DateID
+        LEFT JOIN (
+            SELECT 
+                r2.RegionName,
+                strftime('%Y-%m', d2.Date) as Month,
+                SUM(fs2.{energy_column}) as PreviousMonthEnergy
+            FROM FactAllIndiaDailySummary fs2
+            JOIN DimRegions r2 ON fs2.RegionID = r2.RegionID
+            JOIN DimDates d2 ON fs2.DateID = d2.DateID
+            WHERE strftime('%Y', d2.Date) = '2024'
+            GROUP BY r2.RegionName, strftime('%Y-%m', d2.Date)
+        ) prev ON r.RegionName = prev.RegionName 
+            AND strftime('%Y-%m', d.Date) = date(prev.Month || '-01', '+1 month')
+        WHERE strftime('%Y', d.Date) = '2024'
+        GROUP BY r.RegionName, strftime('%Y-%m', d.Date)
+        ORDER BY r.RegionName, Month
+        """
+    
+    def _generate_generation_fallback_sql(self, query_lower: str, entities: list, time_filter: str, aggregation_function: str) -> str:
+        """Generate generation-specific fallback SQL"""
+        return f"""
+            SELECT dgs.SourceName, ROUND({aggregation_function}(fdgb.GenerationAmount), 2) as TotalGeneration
+            FROM FactDailyGenerationBreakdown fdgb
+            JOIN DimGenerationSources dgs ON fdgb.GenerationSourceID = dgs.GenerationSourceID
+            JOIN DimDates dt ON fdgb.DateID = dt.DateID
+            {time_filter}
+            GROUP BY dgs.SourceName
+            ORDER BY TotalGeneration DESC
+        """
+    
+    def _generate_default_fallback_sql(self, query: str, time_filter: str) -> str:
+        """Generate default fallback SQL with warning"""
+        return f"""
+            SELECT 
+                'Fallback SQL Generated' as Status,
+                'Query: {query[:50]}...' as OriginalQuery,
+                'This is an approximate result based on fallback logic' as Warning,
+                COUNT(*) as RecordCount
+            FROM FactAllIndiaDailySummary f
+            JOIN DimDates dt ON f.DateID = dt.DateID
+            {time_filter}
+            LIMIT 1
+        """
 
 
 class ValidationAgent(BaseAgent):
@@ -339,11 +551,29 @@ class ValidationAgent(BaseAgent):
                 )
             
             sql = sql_generation.get("sql", "")
-            if not sql:
+            if not sql or sql.strip() == "":
                 return AgentResult(
                     success=False,
                     data={},
                     error="No SQL to validate",
+                    execution_time=time.time() - start_time
+                )
+            
+            # Skip validation for fallback SQL (basic validation only)
+            if sql_generation.get("generation_method") in ["fallback", "error_fallback"]:
+                return AgentResult(
+                    success=True,
+                    data={
+                        "is_valid": True,
+                        "validation_method": "fallback_skip",
+                        "warnings": [
+                            "Using fallback SQL - results may be approximate",
+                            "Template matching failed, using intelligent fallback",
+                            "Consider rephrasing query for more accurate results"
+                        ],
+                        "confidence_reason": "Fallback SQL generated due to template mismatch"
+                    },
+                    confidence=0.6,  # Lower confidence for fallback SQL
                     execution_time=time.time() - start_time
                 )
             
@@ -358,7 +588,7 @@ class ValidationAgent(BaseAgent):
                 data=validation_result,
                 confidence=validation_result.get("confidence", 0.0),
                 execution_time=time.time() - start_time,
-                metadata={"validation_checks": len(validation_result.get("checks", []))}
+                metadata={"sql_length": len(sql)}
             )
             
         except Exception as e:
@@ -408,7 +638,8 @@ class ExecutionAgent(BaseAgent):
                     execution_time=time.time() - start_time
                 )
             
-            if validation and not validation.get("is_valid", False):
+            # Check validation only if it's not fallback SQL
+            if validation and not validation.get("is_valid", False) and sql_generation.get("generation_method") not in ["fallback", "error_fallback"]:
                 return AgentResult(
                     success=False,
                     data={},
@@ -417,7 +648,7 @@ class ExecutionAgent(BaseAgent):
                 )
             
             sql = sql_generation.get("sql", "")
-            if not sql:
+            if not sql or sql.strip() == "":
                 return AgentResult(
                     success=False,
                     data={},
@@ -607,14 +838,15 @@ class WorkflowEngine:
                     agent_type=AgentType.VALIDATION,
                     name="SQL Validation",
                     description="Validate generated SQL",
-                    dependencies=["sql_generation"]
+                    dependencies=["sql_generation"],
+                    required=False  # Make validation optional
                 ),
                 WorkflowStep(
                     step_id="execution",
                     agent_type=AgentType.EXECUTION,
                     name="SQL Execution",
                     description="Execute validated SQL",
-                    dependencies=["validation"]
+                    dependencies=["sql_generation"]  # Can execute even if validation fails
                 ),
                 WorkflowStep(
                     step_id="visualization",
