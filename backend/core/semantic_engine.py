@@ -21,6 +21,7 @@ from backend.core.llm_provider import LLMProvider
 from backend.core.schema_metadata import SchemaMetadataExtractor
 from backend.core.few_shot_examples import FewShotExampleRepository, FewShotExampleRetriever
 from backend.core.query_planner import MultiStepQueryPlanner, QueryComplexity
+from backend.core.sql_templates import SQLTemplateEngine, TemplateContext, TemplateValidation
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,9 @@ class SemanticEngine:
             
         # Initialize multi-step query planner
         self.query_planner = MultiStepQueryPlanner(llm_provider)
+        
+        # Initialize SQL template engine for constrained SQL generation
+        self.sql_template_engine = SQLTemplateEngine()
             
         self._initialize_vector_store()
         
@@ -876,8 +880,38 @@ class SemanticEngine:
             return await self._generate_sql_single_step(generation_context)
     
     async def _generate_sql_single_step(self, generation_context: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate SQL using the existing single-step approach with robust error handling"""
-        # Use LLM for contextual SQL generation
+        """Generate SQL using constrained templates with fallback to LLM"""
+        query = generation_context.get('query', '')
+        
+        # Phase 4.1: Try constrained SQL generation with templates first
+        try:
+            logger.info(f"Attempting constrained SQL generation with templates for query: {query}")
+            template_sql, template_validation = self.sql_template_engine.generate_sql(query)
+            
+            if template_sql and template_validation.is_valid:
+                logger.info(f"Template-based SQL generation successful with confidence: {template_validation.confidence}")
+                return {
+                    "sql": template_sql,
+                    "confidence": template_validation.confidence,
+                    "generation_method": "template",
+                    "validation": {
+                        "is_valid": template_validation.is_valid,
+                        "errors": template_validation.errors,
+                        "warnings": template_validation.warnings
+                    },
+                    "template_context": {
+                        "query_type": "template_generated",
+                        "validation_rules_applied": len(self.sql_template_engine.validation_rules)
+                    }
+                }
+            else:
+                logger.warning(f"Template generation failed: {template_validation.errors}")
+                
+        except Exception as e:
+            logger.error(f"Template generation failed: {e}")
+        
+        # Fallback to LLM-based generation with enhanced validation
+        logger.info("Falling back to LLM-based SQL generation")
         sql_prompt = self._build_sql_generation_prompt(generation_context)
         
         try:
@@ -898,8 +932,8 @@ class SemanticEngine:
             sql_result = self._parse_sql_response(response_text)
             generated_sql = sql_result.get("sql", "")
             
-            # FIXED: Add validation and retry logic
-            query_lower = generation_context['query'].lower()
+            # Enhanced validation with template-based rules
+            query_lower = query.lower()
             
             # Determine expected aggregation function and column for validation
             aggregation_function = "SUM"  # Default
@@ -920,17 +954,17 @@ class SemanticEngine:
             elif "generation" in query_lower:
                 energy_column = "GenerationAmount"
             
-            # Validate the generated SQL
+            # Validate the generated SQL using template-based rules
             is_valid = self._validate_sql_against_instructions(generated_sql, aggregation_function, energy_column, query_lower)
             
             if not is_valid and generated_sql:
                 logger.warning(f"Generated SQL failed validation, attempting retry with more explicit instructions")
                 
-                # Retry with more explicit instructions
+                # Retry with more explicit instructions based on template rules
                 retry_prompt = f"""
 You are a SQL expert. The previous SQL generation was incorrect.
 
-User request: "{generation_context['query']}"
+User request: "{query}"
 
 CRITICAL REQUIREMENTS:
 - Use {aggregation_function}() function
@@ -971,15 +1005,21 @@ Generate ONLY the SQL query:
             
             return {
                 "sql": generated_sql,
-                "explanation": sql_result.get("explanation", ""),
-                "confidence": generation_context.get("confidence", 0.5),
-                "context_used": generation_context,
-                "semantic_mappings": generation_context.get("semantic_mappings", {}),
-                "validation_passed": is_valid
+                "confidence": 0.7 if is_valid else 0.3,
+                "generation_method": "llm_with_validation",
+                "validation": {
+                    "is_valid": is_valid,
+                    "errors": [] if is_valid else ["SQL validation failed"],
+                    "warnings": []
+                },
+                "template_context": {
+                    "query_type": "llm_generated",
+                    "validation_rules_applied": 0
+                }
             }
             
         except Exception as e:
-            logger.error(f"Contextual SQL generation failed: {e}")
+            logger.error(f"SQL generation failed: {e}")
             return self._fallback_sql_generation(generation_context)
     
     def _fallback_sql_generation(self, generation_context: Dict[str, Any]) -> Dict[str, Any]:

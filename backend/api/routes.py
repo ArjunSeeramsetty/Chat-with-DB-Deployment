@@ -5,7 +5,7 @@ Enhanced API routes with improved error handling and validation
 import logging
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -788,6 +788,99 @@ async def submit_semantic_feedback(request: dict):
             "success": False,
             "error": str(e)
         }
+
+
+@router.get("/api/v1/feedback/analytics")
+async def get_feedback_analytics(days: int = 30):
+    """Get comprehensive feedback analytics"""
+    try:
+        settings = get_settings()
+        enhanced_rag = SemanticRAGService(db_path=settings.database_path)
+        
+        analytics = await enhanced_rag.get_feedback_analytics(days)
+        
+        return analytics
+        
+    except Exception as e:
+        logger.error(f"Failed to get feedback analytics: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.get("/api/v1/feedback/similar")
+async def get_similar_feedback(query: str, limit: int = 5):
+    """Get similar feedback for a query"""
+    try:
+        settings = get_settings()
+        enhanced_rag = SemanticRAGService(db_path=settings.database_path)
+        
+        similar_feedback = await enhanced_rag.get_similar_feedback(query, limit)
+        
+        return similar_feedback
+        
+    except Exception as e:
+        logger.error(f"Failed to get similar feedback: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.post("/api/v1/feedback/learning-insights")
+async def get_learning_insights():
+    """Get learning insights from feedback data"""
+    try:
+        settings = get_settings()
+        enhanced_rag = SemanticRAGService(db_path=settings.database_path)
+        
+        # Get feedback analytics for insights
+        analytics = await enhanced_rag.get_feedback_analytics(days=30)
+        
+        if analytics.get("success"):
+            insights = analytics.get("insights", {})
+            return {
+                "success": True,
+                "insights": insights,
+                "recommendations": _generate_improvement_recommendations(insights)
+            }
+        else:
+            return analytics
+            
+    except Exception as e:
+        logger.error(f"Failed to get learning insights: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def _generate_improvement_recommendations(insights: Dict[str, Any]) -> List[str]:
+    """Generate improvement recommendations based on insights"""
+    recommendations = []
+    
+    # Analyze error patterns
+    error_patterns = insights.get("error_patterns", [])
+    if error_patterns:
+        top_error = error_patterns[0]
+        recommendations.append(f"Focus on fixing '{top_error['error']}' (occurred {top_error['count']} times)")
+    
+    # Analyze processing mode effectiveness
+    mode_effectiveness = insights.get("mode_effectiveness", {})
+    for mode, stats in mode_effectiveness.items():
+        if stats.get("success_rate", 0) < 80:
+            recommendations.append(f"Improve {mode} processing mode (success rate: {stats.get('success_rate', 0):.1f}%)")
+    
+    # Analyze complexity distribution
+    complexity_distribution = insights.get("complexity_distribution", {})
+    if complexity_distribution.get("complex", 0) > complexity_distribution.get("simple", 0):
+        recommendations.append("Consider simplifying complex query processing")
+    
+    if not recommendations:
+        recommendations.append("System performing well - continue monitoring")
+    
+    return recommendations
 
 
 @router.post("/api/v1/ask-fixed")
