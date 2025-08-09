@@ -1,0 +1,117 @@
+{
+  "test_cases": [
+    {
+      "id": "agg_001",
+      "category": "aggregation",
+      "original_query": "What is the average energy consumption by region?",
+      "expected_sql": "SELECT AVG(fs.EnergyMet) as AvgEnergy, r.RegionName FROM FactAllIndiaDailySummary fs JOIN DimRegions r ON fs.RegionID = r.RegionID GROUP BY r.RegionName",
+      "expected_result": null,
+      "business_rules": [
+        "EnergyMet should be aggregated using AVG",
+        "Must join with DimRegions for region names"
+      ],
+      "complexity_score": 1.5,
+      "description": "Average energy consumption aggregation by region",
+      "tags": [
+        "aggregation",
+        "energy_consumption",
+        "region"
+      ]
+    },
+    {
+      "id": "agg_002",
+      "category": "aggregation",
+      "original_query": "Show me the total energy shortage across all states",
+      "expected_sql": "SELECT SUM(fs.EnergyShortage) as TotalShortage FROM FactAllIndiaDailySummary fs",
+      "expected_result": null,
+      "business_rules": [
+        "EnergyShortage should be summed for total",
+        "No grouping needed for overall total"
+      ],
+      "complexity_score": 1.0,
+      "description": "Total energy shortage calculation",
+      "tags": [
+        "aggregation",
+        "energy_shortage",
+        "total"
+      ]
+    },
+    {
+      "id": "filter_001",
+      "category": "filtering",
+      "original_query": "Show energy consumption for the last 30 days",
+      "expected_sql": "SELECT fs.EnergyMet, d.Date FROM FactAllIndiaDailySummary fs JOIN DimDates d ON fs.DateID = d.DateID WHERE d.Date >= date('now', '-30 days') ORDER BY d.Date",
+      "expected_result": null,
+      "business_rules": [
+        "Must filter by date range",
+        "Should join with DimDates for date information"
+      ],
+      "complexity_score": 2.0,
+      "description": "Energy consumption for last 30 days",
+      "tags": [
+        "filtering",
+        "date_range",
+        "energy_consumption"
+      ]
+    },
+    {
+      "id": "complex_001",
+      "category": "complex",
+      "original_query": "What is the trend of energy shortage by region over the past month, showing only regions with shortage > 1000?",
+      "expected_sql": "SELECT AVG(fs.EnergyShortage) as AvgShortage, r.RegionName, d.Date FROM FactAllIndiaDailySummary fs JOIN DimRegions r ON fs.RegionID = r.RegionID JOIN DimDates d ON fs.DateID = d.DateID WHERE d.Date >= date('now', '-30 days') GROUP BY r.RegionName, d.Date HAVING AVG(fs.EnergyShortage) > 1000 ORDER BY r.RegionName, d.Date",
+      "expected_result": null,
+      "business_rules": [
+        "Must filter by date range",
+        "Must group by region and date",
+        "Must filter by shortage threshold",
+        "Must join multiple tables"
+      ],
+      "complexity_score": 3.5,
+      "description": "Complex trend analysis with filtering and grouping",
+      "tags": [
+        "complex",
+        "trend_analysis",
+        "filtering",
+        "grouping"
+      ]
+    },
+    {
+      "id": "energy_001",
+      "category": "energy_consumption",
+      "original_query": "Which regions have the highest energy consumption?",
+      "expected_sql": "SELECT r.RegionName, SUM(fs.EnergyMet) as TotalConsumption FROM FactAllIndiaDailySummary fs JOIN DimRegions r ON fs.RegionID = r.RegionID GROUP BY r.RegionName ORDER BY TotalConsumption DESC LIMIT 10",
+      "expected_result": null,
+      "business_rules": [
+        "Must aggregate EnergyMet by region",
+        "Must order by consumption descending",
+        "Should limit results"
+      ],
+      "complexity_score": 2.0,
+      "description": "Top regions by energy consumption",
+      "tags": [
+        "energy_consumption",
+        "ranking",
+        "region"
+      ]
+    },
+    {
+      "id": "demand_001",
+      "category": "demand_analysis",
+      "original_query": "What is the maximum demand by state?",
+      "expected_sql": "SELECT s.StateName, MAX(fs.MaxDemandSCADA) as MaxDemand FROM FactAllIndiaDailySummary fs JOIN DimStates s ON fs.StateID = s.StateID GROUP BY s.StateName ORDER BY MaxDemand DESC",
+      "expected_result": null,
+      "business_rules": [
+        "Must use MaxDemandSCADA column",
+        "Must join with DimStates",
+        "Must group by state"
+      ],
+      "complexity_score": 2.0,
+      "description": "Maximum demand analysis by state",
+      "tags": [
+        "demand_analysis",
+        "maximum",
+        "state"
+      ]
+    }
+  ]
+}

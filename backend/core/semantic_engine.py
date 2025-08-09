@@ -22,6 +22,9 @@ from backend.core.schema_metadata import SchemaMetadataExtractor
 from backend.core.few_shot_examples import FewShotExampleRepository, FewShotExampleRetriever
 from backend.core.query_planner import MultiStepQueryPlanner, QueryComplexity
 from backend.core.sql_templates import SQLTemplateEngine, TemplateContext, TemplateValidation
+from backend.core.multi_layer_validator import MultiLayerValidator, MultiLayerValidationResult
+from backend.core.hitl_system import HITLSystem, ApprovalStatus, QueryRiskLevel
+from backend.core.feedback_storage import FeedbackStorage
 
 logger = logging.getLogger(__name__)
 
@@ -93,20 +96,50 @@ class SemanticEngine:
             self.few_shot_repository = FewShotExampleRepository(db_path)
             self.few_shot_retriever = FewShotExampleRetriever(self.few_shot_repository)
             
+        # Initialize ontology-enhanced RAG system
+        self.ontology_enhanced_rag = None
+        if db_path:
+            try:
+                from .ontology_enhanced_rag import OntologyEnhancedRAG
+                from .energy_ontology import EnergyOntology
+                ontology = EnergyOntology(db_path)
+                self.ontology_enhanced_rag = OntologyEnhancedRAG(db_path, ontology)
+                logger.info("Ontology-enhanced RAG system initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize ontology-enhanced RAG: {e}")
+            
         # Initialize multi-step query planner
         self.query_planner = MultiStepQueryPlanner(llm_provider)
         
         # Initialize SQL template engine for constrained SQL generation
         self.sql_template_engine = SQLTemplateEngine()
-            
-        self._initialize_vector_store()
         
+        # Initialize multi-layer validator for enhanced validation
+        self.multi_layer_validator = MultiLayerValidator(schema_info=self._get_schema_info(), db_path=db_path)
+        
+        # Initialize HITL system for human-in-the-loop functionality
+        self.hitl_system = None
+        if db_path:
+            feedback_storage = FeedbackStorage(db_path)
+            self.hitl_system = HITLSystem(db_path, feedback_storage)
+            
     async def initialize(self):
         """Initialize the semantic engine with domain knowledge"""
         await self._load_domain_model()
         await self._populate_vector_store()
         logger.info("Semantic engine initialized successfully")
         
+    def _get_schema_info(self) -> Dict[str, Any]:
+        """Get schema information for validation"""
+        if not self.schema_extractor:
+            return {}
+        
+        try:
+            return self.schema_extractor.extract_schema_metadata()
+        except Exception as e:
+            logger.warning(f"Failed to extract schema info: {e}")
+            return {}
+    
     def _initialize_vector_store(self):
         """Initialize vector database collections"""
         try:
@@ -253,7 +286,6 @@ class SemanticEngine:
                 }
             ))
             
-        # Upload to vector store
         self.vector_client.upsert(
             collection_name="schema_semantics",
             points=schema_points
@@ -764,9 +796,9 @@ class SemanticEngine:
                 natural_language_query, generation_context, schema_context
             )
         else:
-            # Use existing single-step approach for simple/moderate queries
-            logger.info(f"Using single-step SQL generation for {complexity.value} query")
-            return await self._generate_sql_single_step(generation_context)
+            # Use HITL-integrated SQL generation for simple/moderate queries
+            logger.info(f"Using HITL-integrated SQL generation for {complexity.value} query")
+            return await self._generate_sql_with_hitl(generation_context)
     
     def _analyze_query_complexity(self, query: str) -> QueryComplexity:
         """Analyze query complexity to determine if multi-step planning is needed"""
@@ -932,54 +964,14 @@ class SemanticEngine:
             sql_result = self._parse_sql_response(response_text)
             generated_sql = sql_result.get("sql", "")
             
-            # Enhanced validation with template-based rules
-            query_lower = query.lower()
+            # Enhanced multi-layer validation
+            validation_result = await self._validate_sql_multi_layer(generated_sql, query, generation_context)
             
-            # Determine expected aggregation function and column for validation
-            aggregation_function = "SUM"  # Default
-            if any(word in query_lower for word in ["average", "avg", "mean"]):
-                aggregation_function = "AVG"
-            elif any(word in query_lower for word in ["maximum", "max", "highest"]):
-                aggregation_function = "MAX"
-            elif any(word in query_lower for word in ["minimum", "min", "lowest"]):
-                aggregation_function = "MIN"
-            
-            energy_column = "EnergyMet"  # Default
-            if "shortage" in query_lower:
-                energy_column = "EnergyShortage"
-            elif "deficit" in query_lower:
-                energy_column = "EnergyShortage"
-            elif "demand" in query_lower:
-                energy_column = "MaximumDemand"
-            elif "generation" in query_lower:
-                energy_column = "GenerationAmount"
-            
-            # Validate the generated SQL using template-based rules
-            is_valid = self._validate_sql_against_instructions(generated_sql, aggregation_function, energy_column, query_lower)
-            
-            if not is_valid and generated_sql:
-                logger.warning(f"Generated SQL failed validation, attempting retry with more explicit instructions")
+            if not validation_result.overall_valid and generated_sql:
+                logger.warning(f"Generated SQL failed multi-layer validation, attempting retry with more explicit instructions")
                 
-                # Retry with more explicit instructions based on template rules
-                retry_prompt = f"""
-You are a SQL expert. The previous SQL generation was incorrect.
-
-User request: "{query}"
-
-CRITICAL REQUIREMENTS:
-- Use {aggregation_function}() function
-- Use {energy_column} column
-- Do NOT use SUM() if average is requested
-- Do NOT use EnergyMet if shortage is requested
-
-EXAMPLE FOR THIS QUERY:
-SELECT {aggregation_function}(fs.{energy_column}) AS Result
-FROM FactAllIndiaDailySummary fs
-JOIN DimRegions r ON fs.RegionID = r.RegionID
-JOIN DimDates d ON fs.DateID = d.DateID
-
-Generate ONLY the SQL query:
-"""
+                # Retry with more explicit instructions based on validation errors
+                retry_prompt = self._build_retry_prompt_with_validation_feedback(query, validation_result)
                 
                 try:
                     retry_response = await self.llm_provider.generate(retry_prompt)
@@ -991,36 +983,137 @@ Generate ONLY the SQL query:
                         retry_sql_result = self._parse_sql_response(retry_text)
                         retry_sql = retry_sql_result.get("sql", "")
                         
-                        # Validate retry SQL
-                        retry_is_valid = self._validate_sql_against_instructions(retry_sql, aggregation_function, energy_column, query_lower)
+                        # Validate retry SQL with multi-layer validation
+                        retry_validation_result = await self._validate_sql_multi_layer(retry_sql, query, generation_context)
                         
-                        if retry_is_valid:
+                        if retry_validation_result.overall_valid:
                             generated_sql = retry_sql
-                            logger.info("Retry SQL generation successful")
+                            validation_result = retry_validation_result
+                            logger.info("Retry SQL generation successful with multi-layer validation")
                         else:
-                            logger.error("Both initial and retry SQL generation failed validation")
+                            logger.error("Both initial and retry SQL generation failed multi-layer validation")
                             
                 except Exception as e:
                     logger.error(f"Retry LLM call failed: {e}")
             
             return {
                 "sql": generated_sql,
-                "confidence": 0.7 if is_valid else 0.3,
-                "generation_method": "llm_with_validation",
+                "confidence": validation_result.confidence,
+                "generation_method": "llm_with_multi_layer_validation",
                 "validation": {
-                    "is_valid": is_valid,
-                    "errors": [] if is_valid else ["SQL validation failed"],
-                    "warnings": []
+                    "is_valid": validation_result.overall_valid,
+                    "layers": {
+                        name: {
+                            "is_valid": layer.is_valid,
+                            "confidence": layer.confidence,
+                            "errors": layer.errors,
+                            "warnings": layer.warnings,
+                            "execution_time": layer.execution_time
+                        } for name, layer in validation_result.layers.items()
+                    },
+                    "overall_confidence": validation_result.confidence,
+                    "correction_attempts": validation_result.correction_attempts,
+                    "total_execution_time": validation_result.total_execution_time
                 },
                 "template_context": {
                     "query_type": "llm_generated",
-                    "validation_rules_applied": 0
+                    "validation_method": "multi_layer",
+                    "correction_applied": validation_result.correction_attempts > 0
                 }
             }
-            
+        
         except Exception as e:
             logger.error(f"SQL generation failed: {e}")
             return self._fallback_sql_generation(generation_context)
+    
+    async def _generate_sql_with_hitl(self, generation_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate SQL with HITL approval workflow integration"""
+        
+        # Generate SQL using existing method
+        sql_result = await self._generate_sql_single_step(generation_context)
+        
+        # Extract required information for HITL
+        query = generation_context.get('query', '')
+        session_id = generation_context.get('session_id', 'default')
+        user_id = generation_context.get('user_id', 'default')
+        generated_sql = sql_result.get('sql', '')
+        confidence = sql_result.get('confidence', 0.0)
+        validation_result = sql_result.get('validation', {})
+        
+        # Process HITL approval
+        hitl_result = await self._process_hitl_approval(
+            query=query,
+            generated_sql=generated_sql,
+            confidence=confidence,
+            validation_result=validation_result,
+            session_id=session_id,
+            user_id=user_id
+        )
+        
+        # Merge HITL result with SQL result
+        sql_result.update(hitl_result)
+        
+        return sql_result
+    
+    async def _process_hitl_approval(self, query: str, generated_sql: str, confidence: float, validation_result: Dict[str, Any], session_id: str, user_id: str) -> Dict[str, Any]:
+        """Process HITL approval workflow for queries that need human review"""
+        
+        if not self.hitl_system:
+            logger.warning("HITL system not initialized, skipping approval workflow")
+            return {
+                "sql": generated_sql,
+                "confidence": confidence,
+                "requires_approval": False,
+                "approval_status": "auto_approved"
+            }
+        
+        try:
+            # Create approval request
+            approval_request = await self.hitl_system.create_approval_request(
+                session_id=session_id,
+                user_id=user_id,
+                original_query=query,
+                generated_sql=generated_sql,
+                confidence_score=confidence,
+                validation_result=validation_result,
+                metadata={
+                    "generation_method": "semantic_engine",
+                    "validation_layers": list(validation_result.get("layers", {}).keys())
+                }
+            )
+            
+            # Check if auto-approved
+            if approval_request.status == ApprovalStatus.AUTO_APPROVED:
+                logger.info(f"Query auto-approved with confidence {confidence}")
+                return {
+                    "sql": generated_sql,
+                    "confidence": confidence,
+                    "requires_approval": False,
+                    "approval_status": "auto_approved",
+                    "approval_request_id": approval_request.id
+                }
+            else:
+                logger.info(f"Query requires human approval (confidence: {confidence}, risk_level: {approval_request.risk_level.value})")
+                return {
+                    "sql": generated_sql,
+                    "confidence": confidence,
+                    "requires_approval": True,
+                    "approval_status": "pending",
+                    "approval_request_id": approval_request.id,
+                    "risk_level": approval_request.risk_level.value,
+                    "expires_at": approval_request.expires_at.isoformat() if approval_request.expires_at else None
+                }
+                
+        except Exception as e:
+            logger.error(f"HITL approval processing failed: {e}")
+            # Return the SQL without approval if HITL fails
+            return {
+                "sql": generated_sql,
+                "confidence": confidence,
+                "requires_approval": False,
+                "approval_status": "error",
+                "error": str(e)
+            }
     
     def _fallback_sql_generation(self, generation_context: Dict[str, Any]) -> Dict[str, Any]:
         """Fallback SQL generation when LLM fails"""
@@ -1058,7 +1151,7 @@ Generate ONLY the SQL query:
         }
         
     def _build_sql_generation_prompt(self, context: Dict[str, Any]) -> str:
-        """Build comprehensive prompt for SQL generation with schema metadata injection and few-shot examples"""
+        """Build comprehensive prompt for SQL generation with schema metadata injection and ontology-enhanced examples"""
         
         primary_table = context.get("primary_table")
         table_info = primary_table.get("info", {}) if primary_table else {}
@@ -1071,9 +1164,30 @@ Generate ONLY the SQL query:
             except Exception as e:
                 logger.warning(f"Failed to build schema context: {e}")
         
-        # Add few-shot examples if available
+        # Add ontology-enhanced examples if available
+        ontology_examples = ""
+        if self.ontology_enhanced_rag:
+            try:
+                enhanced_examples = self.ontology_enhanced_rag.retrieve_ontology_enhanced_examples(
+                    context['query'], 
+                    max_examples=3,
+                    min_similarity=0.3
+                )
+                if enhanced_examples:
+                    ontology_examples = self.ontology_enhanced_rag.format_ontology_enhanced_examples(enhanced_examples)
+                    logger.info(f"Retrieved {len(enhanced_examples)} ontology-enhanced examples for query")
+                    
+                    # Validate examples against business rules
+                    validated_examples = self.ontology_enhanced_rag.validate_examples_against_business_rules(enhanced_examples)
+                    if len(validated_examples) < len(enhanced_examples):
+                        logger.info(f"Filtered {len(enhanced_examples) - len(validated_examples)} examples due to business rule violations")
+                        
+            except Exception as e:
+                logger.warning(f"Failed to retrieve ontology-enhanced examples: {e}")
+        
+        # Fallback to regular few-shot examples if ontology-enhanced RAG is not available
         few_shot_examples = ""
-        if self.few_shot_retriever:
+        if not ontology_examples and self.few_shot_retriever:
             try:
                 examples = self.few_shot_retriever.retrieve_examples_for_query(
                     context['query'], 
@@ -1085,6 +1199,9 @@ Generate ONLY the SQL query:
                     logger.info(f"Retrieved {len(examples)} few-shot examples for query")
             except Exception as e:
                 logger.warning(f"Failed to retrieve few-shot examples: {e}")
+        
+        # Use ontology-enhanced examples if available, otherwise use regular examples
+        examples_section = ontology_examples if ontology_examples else few_shot_examples
         
         # CRITICAL FIX: Detect aggregation function and column from query
         query_lower = context['query'].lower()
@@ -1155,9 +1272,11 @@ SELECT AVG(fs.EnergyShortage) AS AverageShortage
 FROM FactAllIndiaDailySummary fs
 JOIN DimRegions r ON fs.RegionID = r.RegionID
 JOIN DimDates d ON fs.DateID = d.DateID
+WHERE d.ActualDate >= '2025-01-01' AND d.ActualDate <= '2025-12-31'
+GROUP BY r.RegionName
+ORDER BY AverageShortage DESC;
 
-Return ONLY the SQL code above. Nothing else.
-"""
+Generate ONLY the SQL query, no explanations or additional text:"""
             return prompt
         
         elif "average" in query_lower and "energy" in query_lower:
@@ -1227,7 +1346,7 @@ User request: "{context['query']}"
 
 {schema_context}
 
-{few_shot_examples}
+{examples_section}
 
 IMPORTANT REQUIREMENTS:
 1. Generate a COMPLETE SQL query starting with SELECT
@@ -1388,29 +1507,67 @@ Generate the SQL query:
         # If all else fails, return empty string
         return ""
 
-    def _validate_sql_against_instructions(self, sql: str, aggregation_function: str, energy_column: str, query_lower: str) -> bool:
-        """Validate if the generated SQL follows the business rules"""
-        sql_lower_check = sql.lower()
+    async def _validate_sql_multi_layer(self, sql: str, query: str, generation_context: Dict[str, Any]) -> MultiLayerValidationResult:
+        """
+        Validate the generated SQL using the multi-layer validator.
+        This includes syntax, business rules, dry run, and reasonableness validation.
+        """
+        try:
+            # Use the multi-layer validator's main validation method
+            validation_result = await self.multi_layer_validator.validate_multi_layer(sql, generation_context)
+            return validation_result
+        except Exception as e:
+            logger.error(f"Multi-layer validation failed: {e}")
+            # Return a failed validation result
+            return MultiLayerValidationResult(
+                overall_valid=False,
+                layers={},
+                confidence=0.0,
+                fixed_sql=None,
+                correction_attempts=0,
+                total_execution_time=0.0
+            )
+
+    def _build_retry_prompt_with_validation_feedback(self, query: str, validation_result: MultiLayerValidationResult) -> str:
+        """
+        Build a retry prompt for LLM based on validation feedback.
+        This helps the LLM understand why the previous SQL was incorrect.
+        """
+        retry_prompt = f"""
+You are a SQL expert. The previous SQL generation was incorrect.
+
+User request: "{query}"
+
+VALIDATION FEEDBACK:
+"""
         
-        # Check if correct aggregation function is used
-        expected_agg = aggregation_function.lower()
-        if expected_agg not in sql_lower_check:
-            logger.warning(f"Expected {expected_agg}() but found different aggregation in SQL: {sql[:200]}...")
-            return False
+        # Add specific feedback from validation layers
+        for layer_name, layer in validation_result.layers.items():
+            if not layer.is_valid:
+                retry_prompt += f"\n❌ {layer_name.upper()} LAYER FAILED:\n"
+                if layer.errors:
+                    retry_prompt += f"Errors: {', '.join(layer.errors[:3])}\n"
+                if layer.warnings:
+                    retry_prompt += f"Warnings: {', '.join(layer.warnings[:3])}\n"
         
-        # Check if correct column is used
-        if energy_column.lower() not in sql_lower_check:
-            logger.warning(f"Expected {energy_column} column but found different column in SQL: {sql[:200]}...")
-            return False
+        # Add general guidance based on common issues
+        retry_prompt += f"""
+CRITICAL REQUIREMENTS:
+- Ensure proper SQL syntax
+- Use correct table and column names
+- Apply appropriate aggregation functions (AVG, SUM, MAX, MIN)
+- Include necessary JOIN clauses for multiple tables
+- Avoid dangerous operations (DROP, DELETE, UPDATE, INSERT)
+
+EXAMPLE STRUCTURE:
+SELECT [appropriate_aggregation]([correct_column]) AS Result
+FROM [correct_table] [alias]
+JOIN [related_table] [alias] ON [join_condition]
+WHERE [conditions]
+GROUP BY [grouping_columns]
+ORDER BY [ordering_columns]
+
+Generate ONLY the SQL query:
+"""
         
-        # Additional checks for specific query types
-        if "average" in query_lower and "shortage" in query_lower:
-            # For average shortage queries, check for forbidden patterns
-            if "sum(" in sql_lower_check:
-                logger.warning(f"Found forbidden SUM() in average shortage query: {sql[:200]}...")
-                return False
-            if "energymet" in sql_lower_check:
-                logger.warning(f"Found forbidden EnergyMet column in average shortage query: {sql[:200]}...")
-                return False
-        
-        return True
+        return retry_prompt

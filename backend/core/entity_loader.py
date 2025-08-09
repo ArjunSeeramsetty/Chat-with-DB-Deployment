@@ -42,6 +42,9 @@ class EntityLoader:
                 "state_name_mappings": entity_recognition.get(
                     "state_name_mappings", {}
                 ),
+                "region_name_mappings": entity_recognition.get(
+                    "region_name_mappings", {}
+                ),
                 "energy_metrics": entity_recognition.get("energy_metrics", []),
                 "aggregation_keywords": entity_recognition.get(
                     "aggregation_keywords", []
@@ -78,6 +81,10 @@ class EntityLoader:
         """Get state name mappings (lowercase to proper case)"""
         return self._entities.get("state_name_mappings", {})
 
+    def get_region_name_mappings(self) -> Dict[str, str]:
+        """Get region name mappings (lowercase to canonical region name)"""
+        return self._entities.get("region_name_mappings", {})
+
     def get_energy_metrics(self) -> List[str]:
         """Get list of energy metrics"""
         return self._entities.get("energy_metrics", [])
@@ -102,6 +109,25 @@ class EntityLoader:
         """Convert lowercase state name to proper case"""
         mappings = self.get_state_name_mappings()
         return mappings.get(state_lower.lower(), state_lower.title())
+
+    def get_proper_region_name(self, region_text: str) -> Optional[str]:
+        """Map a region synonym or name to the canonical region name if possible."""
+        if not region_text:
+            return None
+        text = region_text.lower().strip()
+        # Direct match in mappings
+        mappings = self.get_region_name_mappings()
+        if text in mappings:
+            return mappings[text]
+        # If already looks canonical, try simple title casing patterns
+        known_regions = [r.lower() for r in self.get_indian_regions()]
+        if text in known_regions:
+            # Return the exact item from configured list with original casing if possible
+            for r in self.get_indian_regions():
+                if r.lower() == text:
+                    # Ensure canonical formatting e.g., "Northern Region"
+                    return r.title() if r.islower() else r
+        return None
 
     def is_indian_state(self, text: str) -> bool:
         """Check if text is an Indian state"""

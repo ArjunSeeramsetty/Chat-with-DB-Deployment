@@ -557,11 +557,22 @@ Return ONLY the JSON object, no explanations or code:"""
         elif "export" in query_lower:
             entities.append("export")
 
-        # Extract regions using centralized entity loader
+        # Extract regions using centralized entity loader with alias support (e.g., "north")
+        # First try direct matches from configured regions
         indian_regions = self.entity_loader.get_indian_regions()
         for region in indian_regions:
             if region.lower() in query_lower:
                 entities.append(region)
+        # Then scan tokens/phrases for region aliases using mappings
+        region_mappings = self.entity_loader.get_region_name_mappings()
+        if region_mappings:
+            # Sort by descending key length to prefer longer matches (e.g., "north eastern region" before "north")
+            for alias in sorted(region_mappings.keys(), key=len, reverse=True):
+                alias_lower = alias.lower()
+                if alias_lower and alias_lower in query_lower:
+                    canonical = region_mappings[alias]
+                    if canonical not in entities:
+                        entities.append(canonical)
 
         # Extract states using centralized entity loader
         indian_states = self.entity_loader.get_indian_states()

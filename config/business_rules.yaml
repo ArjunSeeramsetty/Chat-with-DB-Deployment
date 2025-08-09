@@ -277,6 +277,29 @@ entity_recognition:
     - "north eastern region"
     - "central region"
   
+  # Region name mappings (synonyms/aliases -> canonical region name)
+  region_name_mappings:
+    nr: "Northern Region"
+    north: "Northern Region"
+    northern: "Northern Region"
+    "northern region": "Northern Region"
+    sr: "Southern Region"
+    south: "Southern Region"
+    southern: "Southern Region"
+    "southern region": "Southern Region"
+    er: "Eastern Region"
+    east: "Eastern Region"
+    eastern: "Eastern Region"
+    "eastern region": "Eastern Region"
+    wr: "Western Region"
+    west: "Western Region"
+    western: "Western Region"
+    "western region": "Western Region"
+    ner: "North Eastern Region"
+    "north east": "North Eastern Region"
+    "north eastern": "North Eastern Region"
+    "north eastern region": "North Eastern Region"
+  
   # State name mappings (lowercase to proper case)
   state_name_mappings:
     maharashtra: "Maharashtra"

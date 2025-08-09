@@ -688,7 +688,7 @@ class SQLAssembler:
                 )
 
             # STEP 2: Determine time period
-            time_period = "monthly"  # Default
+            time_period = "none"  # Default - no time-based grouping unless explicitly mentioned
             if any(
                 word in original_query_lower
                 for word in ["quarterly", "quarter", "q1", "q2", "q3", "q4"]
@@ -705,7 +705,7 @@ class SQLAssembler:
                 time_period = "daily"
             elif any(
                 word in original_query_lower
-                for word in ["monthly", "month over month", "per month"]
+                for word in ["monthly", "month over month", "per month", "by month"]
             ):
                 time_period = "monthly"
 
@@ -1130,7 +1130,7 @@ class SQLAssembler:
                                 GROUP BY d.{table_config['name_column']}, dt.DayOfMonth
                                 ORDER BY d.{table_config['name_column']}, dt.DayOfMonth
                             """
-                        else:  # yearly or default
+                        elif time_period == "yearly":
                             sql = f"""
                                 SELECT d.{table_config['name_column']}, dt.Year, ROUND({aggregation_function}(f.{energy_column}), 2) as {column_alias}
                                 FROM {table_name} f
@@ -1139,6 +1139,16 @@ class SQLAssembler:
                                 {where_clause}
                                 GROUP BY d.{table_config['name_column']}, dt.Year
                                 ORDER BY d.{table_config['name_column']}, dt.Year
+                            """
+                        else:  # time_period == "none" - no time-based grouping
+                            sql = f"""
+                                SELECT d.{table_config['name_column']}, ROUND({aggregation_function}(f.{energy_column}), 2) as {column_alias}
+                                FROM {table_name} f
+                                {table_config['join_clause']}
+                                JOIN DimDates dt ON f.DateID = dt.DateID
+                                {where_clause}
+                                GROUP BY d.{table_config['name_column']}
+                                ORDER BY {column_alias} DESC
                             """
 
                         logger.info(
@@ -1673,18 +1683,9 @@ class SQLAssembler:
             logger.info(f"Extracted entities: {analysis.entities}")
             for entity in analysis.entities:
                 if analysis.query_type.value == "region":
-                    # Check if entity is a region name - map to correct database value
-                    region_mapping = {
-                        "northern region": "Northern Region",
-                        "southern region": "Southern Region",
-                        "eastern region": "Eastern Region",
-                        "western region": "Western Region",
-                        "north eastern region": "North Eastern Region",
-                    }
-
-                    # Try to find a match in the mapping
+                    # Map region entity via centralized entity loader (supports aliases like "north")
                     entity_lower = entity.lower()
-                    mapped_region = region_mapping.get(entity_lower)
+                    mapped_region = self.entity_loader.get_proper_region_name(entity_lower)
 
                     if mapped_region:
                         conditions.append(f"d.RegionName = '{mapped_region}'")
@@ -2078,13 +2079,13 @@ class SQLAssembler:
         elif any(word in query_lower for word in ["weekly", "week", "per week"]):
             return "weekly"
         elif any(
-            word in query_lower for word in ["monthly", "month over month", "per month"]
+            word in query_lower for word in ["monthly", "month over month", "per month", "by month"]
         ):
             return "monthly"
         elif any(word in query_lower for word in ["daily", "day", "per day"]):
             return "daily"
         else:
-            return "monthly"  # Default to monthly
+            return "none"  # No time period specified - don't add time-based grouping
 
     def _generate_growth_column_aliases(
         self, energy_column: str, time_period: str
@@ -2223,7 +2224,7 @@ class SQLAssembler:
 
             # Generate column aliases
             current_alias, previous_alias = self._generate_growth_column_aliases(
-                energy_column, "monthly"  # Default to monthly for now
+                energy_column, "none"  # Default to no time-based grouping unless explicitly mentioned
             )
 
             # Format the template with dynamic values

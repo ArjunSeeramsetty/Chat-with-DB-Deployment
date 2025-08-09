@@ -2201,7 +2201,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 )
 
             # STEP 2: Determine time period with improved detection
-            time_period = "monthly"  # Default
+            time_period = "none"  # Default - no time-based grouping unless explicitly mentioned
             if any(
                 word in query_lower
                 for word in ["quarterly", "quarter", "q1", "q2", "q3", "q4"]
@@ -2353,15 +2353,15 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     ORDER BY {name_col}, dt.Year
                     """
                 else:
-                    # Default to monthly
+                    # No time period specified - don't add time-based grouping
                     sql = f"""
-                    SELECT {name_col}, dt.Month, ROUND({agg_func}({metric_col}), 2) as {dynamic_alias}
+                    SELECT {name_col}, ROUND({agg_func}({metric_col}), 2) as {dynamic_alias}
                     FROM {table} f
                     JOIN {join_table} d ON f.{join_col} = d.{join_col}
                     JOIN DimDates dt ON f.DateID = dt.DateID
                     WHERE dt.Year = {year}
-                    GROUP BY {name_col}, dt.Month
-                    ORDER BY {name_col}, dt.Month
+                    GROUP BY {name_col}
+                    ORDER BY {dynamic_alias} DESC
                     """
                 logger.info(f"🔍 GENERATED DIRECT TIME-BASED SQL: {sql[:200]}...")
             else:
