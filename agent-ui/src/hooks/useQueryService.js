@@ -55,8 +55,16 @@ const useQueryService = (dispatch, state) => {
       // Get API base URL from environment or use default
       const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:8000";
       
-      // Send request to the API endpoint
-      const response = await fetch(`${apiBaseUrl}/api/v1/ask`, {
+      // Resolve endpoint based on UI selection
+      const endpointKey = state.selectedEndpoint || 'ask';
+      const endpointPath = endpointKey === 'ask' ? '/api/v1/ask'
+        : endpointKey === 'ask-enhanced' ? '/api/v1/ask-enhanced'
+        : endpointKey === 'ask-fixed' ? '/api/v1/ask-fixed'
+        : endpointKey === 'ask-agentic' ? '/api/v1/ask-agentic'
+        : '/api/v1/ask';
+
+      // Send request to the selected API endpoint
+      const response = await fetch(`${apiBaseUrl}${endpointPath}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestPayload),

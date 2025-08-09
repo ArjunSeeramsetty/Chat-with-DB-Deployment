@@ -790,13 +790,29 @@ class EnhancedRAGService:
                 # Execute the generated SQL
                 repaired_sql = self._validate_and_correct_sql(self._auto_repair_sql(wren_result["sql"]), query)
                 execution_result = await self.sql_executor.execute_sql_async(repaired_sql)
-                
+
+                # Attempt visualization recommendation via agentic visualization logic
+                plot = None
+                try:
+                    if execution_result.success and execution_result.data:
+                        from backend.core.agentic_framework import VisualizationAgent
+                        viz_agent = VisualizationAgent()
+                        viz_dict = await viz_agent._generate_visualization(execution_result.data, query)
+                        if viz_dict:
+                            plot = {
+                                "chartType": viz_dict.get("chart_type", "bar"),
+                                "options": viz_dict.get("config", {})
+                            }
+                except Exception:
+                    plot = None
+
                 # Check if execution was successful
                 if execution_result.success:
                     return {
                         "success": True,
                         "sql": repaired_sql,
                         "data": execution_result.data,
+                        "plot": plot,
                         "confidence": wren_result["confidence"],
                         "processing_method": "wren_ai_mdl",
                         "mdl_context": wren_result.get("mdl_context", {}),
@@ -861,13 +877,29 @@ class EnhancedRAGService:
                 # Execute the generated SQL
                 repaired_sql = self._validate_and_correct_sql(self._auto_repair_sql(semantic_result["sql"]), query)
                 execution_result = await self.sql_executor.execute_sql_async(repaired_sql)
-                
+
+                # Attempt visualization recommendation via agentic visualization logic
+                plot = None
+                try:
+                    if execution_result.success and execution_result.data:
+                        from backend.core.agentic_framework import VisualizationAgent
+                        viz_agent = VisualizationAgent()
+                        viz_dict = await viz_agent._generate_visualization(execution_result.data, query)
+                        if viz_dict:
+                            plot = {
+                                "chartType": viz_dict.get("chart_type", "bar"),
+                                "options": viz_dict.get("config", {})
+                            }
+                except Exception:
+                    plot = None
+
                 # Check if execution was successful
                 if execution_result.success:
                     return {
                         "success": True,
                         "sql": repaired_sql,
                         "data": execution_result.data,
+                        "plot": plot,
                         "confidence": semantic_result.get("confidence", 0.0),
                         "processing_method": "semantic_engine",
                         "semantic_context": semantic_context

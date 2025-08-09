@@ -560,6 +560,7 @@ async def ask_question_enhanced(request: QueryRequest):
             "error": processing_result.get("error"),  # Preserve error field for frontend
             "sql": processing_result.get("sql", ""),
             "data": processing_result.get("data", []),
+            "plot": processing_result.get("plot"),
             "explanation": processing_result.get("explanation"),
             "confidence": processing_result.get("confidence", 0.0),
             "execution_time": processing_result.get("execution_time", 0.0),
@@ -608,8 +609,9 @@ async def ask_question_enhanced(request: QueryRequest):
         else:
             response_data.setdefault("table", {"headers": [], "rows": [], "chartData": []})
 
-        # Provide a minimal plot stub to avoid UI errors
-        response_data.setdefault("plot", {"chartType": "bar", "options": {}})
+        # Provide a minimal plot stub to avoid UI errors if none provided
+        if not response_data.get("plot"):
+            response_data["plot"] = {"chartType": "bar", "options": {}}
         
         # Log successful processing
         total_time = time.time() - start_time

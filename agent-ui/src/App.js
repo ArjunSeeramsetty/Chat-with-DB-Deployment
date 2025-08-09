@@ -124,7 +124,7 @@ function App() {
         </Box>
       </Box>
 
-      {/* LLM Provider Selection */}
+      {/* Controls: LLM Provider + Endpoint Selection */}
       <Paper style={{ padding: 16, marginBottom: 16 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
           <Typography variant="subtitle1">LLM Provider:</Typography>
@@ -135,6 +135,18 @@ function App() {
             >
               <MenuItem value="openai">OpenAI GPT-4</MenuItem>
               <MenuItem value="ollama">Ollama (Local)</MenuItem>
+            </Select>
+          </FormControl>
+          <Typography variant="subtitle1" sx={{ ml: 2 }}>API Endpoint:</Typography>
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <Select
+              value={state.selectedEndpoint}
+              onChange={(e) => dispatch({ type: 'SET_FIELD', field: 'selectedEndpoint', payload: e.target.value })}
+            >
+              <MenuItem value="ask">Default (/api/v1/ask)</MenuItem>
+              <MenuItem value="ask-enhanced">Enhanced (/api/v1/ask-enhanced)</MenuItem>
+              <MenuItem value="ask-fixed">Fixed (/api/v1/ask-fixed)</MenuItem>
+              <MenuItem value="ask-agentic">Agentic (/api/v1/ask-agentic)</MenuItem>
             </Select>
           </FormControl>
         </Box>
