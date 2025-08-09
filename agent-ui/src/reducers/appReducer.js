@@ -7,7 +7,7 @@ export const initialState = {
   sql: "",
   error: "",
   llm: "openai", // Default to OpenAI for faster responses
-  selectedEndpoint: "ask", // API endpoint selector: ask, ask-enhanced, ask-fixed, ask-agentic
+  selectedEndpoint: "ask-fixed", // API endpoint selector: ask (enhanced default), ask-enhanced, ask-fixed (traditional), ask-agentic
   plot: null,
   viewMode: "chart",
   suggestions: [],

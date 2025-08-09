@@ -104,7 +104,7 @@ function App() {
         </Typography>
         
         {/* Backend Status Indicator */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           <Typography variant="caption" color="text.secondary">
             Backend:
           </Typography>
@@ -120,6 +120,15 @@ function App() {
               state.backendStatus === 'unhealthy' ? 'error' : 'default'
             }
             variant="outlined"
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+            Endpoint:
+          </Typography>
+          <Chip
+            label={state.selectedEndpoint}
+            size="small"
+            variant="outlined"
+            color="info"
           />
         </Box>
       </Box>
@@ -138,15 +147,15 @@ function App() {
             </Select>
           </FormControl>
           <Typography variant="subtitle1" sx={{ ml: 2 }}>API Endpoint:</Typography>
-          <FormControl size="small" sx={{ minWidth: 180 }}>
+          <FormControl size="small" sx={{ minWidth: 240 }}>
             <Select
               value={state.selectedEndpoint}
               onChange={(e) => dispatch({ type: 'SET_FIELD', field: 'selectedEndpoint', payload: e.target.value })}
             >
-              <MenuItem value="ask">Default (/api/v1/ask)</MenuItem>
+              <MenuItem value="ask-fixed">Traditional (/api/v1/ask-fixed)</MenuItem>
               <MenuItem value="ask-enhanced">Enhanced (/api/v1/ask-enhanced)</MenuItem>
-              <MenuItem value="ask-fixed">Fixed (/api/v1/ask-fixed)</MenuItem>
-              <MenuItem value="ask-agentic">Agentic (/api/v1/ask-agentic)</MenuItem>
+              <MenuItem value="ask">Backend Default (/api/v1/ask → enhanced)</MenuItem>
+              <MenuItem value="ask-agentic">Agentic Workflow (/api/v1/ask-agentic)</MenuItem>
             </Select>
           </FormControl>
         </Box>
