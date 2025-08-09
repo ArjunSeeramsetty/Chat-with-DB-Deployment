@@ -2233,12 +2233,17 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 return None  # Let the template system handle it
 
             # Use query analysis to determine the correct table
-            if analysis.query_type.value == "region":
+            # Check if this is a "states in region" query
+            is_states_in_region = any(pattern in query_lower for pattern in [
+                "states in", "all states in", "all the states in", "states of", "all states of"
+            ])
+            
+            if analysis.query_type.value == "region" and not is_states_in_region:
                 table = "FactAllIndiaDailySummary"
                 name_col = "RegionName"
                 join_table = "DimRegions"
                 join_col = "RegionID"
-            elif analysis.query_type.value == "state":
+            elif analysis.query_type.value == "state" or is_states_in_region:
                 table = "FactStateDailyEnergy"
                 name_col = "StateName"
                 join_table = "DimStates"
@@ -2295,6 +2300,68 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             has_2024 = "2024" in query_lower
             has_2025 = "2025" in query_lower
             year = "2025" if has_2025 else "2024"
+            
+            # Build entity-based WHERE clauses
+            entity_conditions = []
+            added_conditions = set()  # Track added conditions to avoid duplicates
+            
+            if analysis.entities:
+                logger.info(f"Processing entities for WHERE clause: {analysis.entities}")
+                from backend.core.entity_loader import get_entity_loader
+                entity_loader = get_entity_loader()
+                
+                for entity in analysis.entities:
+                    # Only add state/region entities to WHERE clause, skip metric entities like 'energy'
+                    if analysis.query_type.value == "state":
+                        # Check if entity is a valid state name
+                        if hasattr(self, 'schema_linker') and self.schema_linker:
+                            if entity_loader.is_indian_state(entity):
+                                proper_state_name = entity_loader.get_proper_state_name(entity.lower())
+                                condition = f"d.{name_col} = '{proper_state_name}'"
+                                if condition not in added_conditions:
+                                    entity_conditions.append(condition)
+                                    added_conditions.add(condition)
+                                    logger.info(f"Added state condition: {condition}")
+                            # For "states in region" queries, also check for region names to filter states
+                            elif entity_loader.is_indian_region(entity):
+                                proper_region_name = entity_loader.get_proper_region_name(entity.lower())
+                                if proper_region_name:
+                                    # For state queries with region filter, we need a different approach
+                                    # This will be handled in a separate logic below
+                                    logger.info(f"Found region entity '{proper_region_name}' in state query - will handle separately")
+                                    
+                    elif analysis.query_type.value == "region":
+                        # Check if entity is a valid region name
+                        if hasattr(self, 'schema_linker') and self.schema_linker:
+                            if entity_loader.is_indian_region(entity):
+                                proper_region_name = entity_loader.get_proper_region_name(entity.lower())
+                                if proper_region_name:
+                                    condition = f"d.{name_col} = '{proper_region_name}'"
+                                    if condition not in added_conditions:
+                                        entity_conditions.append(condition)
+                                        added_conditions.add(condition)
+                                        logger.info(f"Added region condition: {condition}")
+                                    
+            # Build complete WHERE clause
+            where_conditions = [f"dt.Year = {year}"]
+            where_conditions.extend(entity_conditions)
+            
+            # Special handling for "states in region" queries
+            region_filter = None
+            if is_states_in_region and analysis.entities:
+                from backend.core.entity_loader import get_entity_loader
+                entity_loader = get_entity_loader()
+                
+                for entity in analysis.entities:
+                    if entity_loader.is_indian_region(entity):
+                        proper_region_name = entity_loader.get_proper_region_name(entity.lower())
+                        if proper_region_name:
+                            region_filter = proper_region_name
+                            where_conditions.append(f"r.RegionName = '{proper_region_name}'")
+                            logger.info(f"Added states-in-region filter: r.RegionName = '{proper_region_name}'")
+                            break  # Only use the first region found
+            
+            where_clause = "WHERE " + " AND ".join(where_conditions)
 
             # Generate dynamic alias based on column and aggregation
             if agg_func == "MAX":
@@ -2318,7 +2385,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     FROM {table} f
                     JOIN {join_table} d ON f.{join_col} = d.{join_col}
                     JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE dt.Year = {year}
+                    {where_clause}
                     GROUP BY {name_col}, dt.Quarter
                     ORDER BY {name_col}, dt.Quarter
                     """
@@ -2328,7 +2395,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     FROM {table} f
                     JOIN {join_table} d ON f.{join_col} = d.{join_col}
                     JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE dt.Year = {year}
+                    {where_clause}
                     GROUP BY {name_col}, dt.Week
                     ORDER BY {name_col}, dt.Week
                     """
@@ -2338,7 +2405,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     FROM {table} f
                     JOIN {join_table} d ON f.{join_col} = d.{join_col}
                     JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE dt.Year = {year}
+                    {where_clause}
                     GROUP BY {name_col}, dt.DayOfMonth
                     ORDER BY {name_col}, dt.DayOfMonth
                     """
@@ -2348,7 +2415,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     FROM {table} f
                     JOIN {join_table} d ON f.{join_col} = d.{join_col}
                     JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE dt.Year = {year}
+                    {where_clause}
                     GROUP BY {name_col}, dt.Year
                     ORDER BY {name_col}, dt.Year
                     """
@@ -2359,7 +2426,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     FROM {table} f
                     JOIN {join_table} d ON f.{join_col} = d.{join_col}
                     JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE dt.Year = {year}
+                    {where_clause}
                     GROUP BY {name_col}
                     ORDER BY {dynamic_alias} DESC
                     """
@@ -2367,24 +2434,36 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             else:
                 # Regular grouping SQL (monthly or no specific time period)
                 if time_period == "monthly":
+                    # Add region JOIN for "states in region" queries
+                    region_join = ""
+                    if is_states_in_region and region_filter:
+                        region_join = "JOIN DimRegions r ON d.RegionID = r.RegionID"
+                    
                     sql = f"""
                     SELECT {name_col}, dt.Month, ROUND({agg_func}({metric_col}), 2) as {dynamic_alias}
                     FROM {table} f
                     JOIN {join_table} d ON f.{join_col} = d.{join_col}
+                    {region_join}
                     JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE dt.Year = {year}
+                    {where_clause}
                     GROUP BY {name_col}, dt.Month
                     ORDER BY {name_col}, dt.Month
                     """
                     logger.info(f"🔍 GENERATED DIRECT MONTHLY SQL: {sql[:200]}...")
                 else:
                     # Regular grouping SQL
+                    # Add region JOIN for "states in region" queries
+                    region_join = ""
+                    if is_states_in_region and region_filter:
+                        region_join = "JOIN DimRegions r ON d.RegionID = r.RegionID"
+                    
                     sql = f"""
                     SELECT {name_col}, ROUND({agg_func}({metric_col}), 2) as {dynamic_alias}
                     FROM {table} f
                     JOIN {join_table} d ON f.{join_col} = d.{join_col}
+                    {region_join}
                     JOIN DimDates dt ON f.DateID = dt.DateID
-                    WHERE dt.Year = {year}
+                    {where_clause}
                     GROUP BY {name_col}
                     ORDER BY {dynamic_alias} DESC
                     """

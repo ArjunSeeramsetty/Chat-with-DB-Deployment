@@ -636,51 +636,88 @@ class WrenAIIntegration:
         9. Use ORDER BY for sorting
         10. Include all necessary JOINs, WHERE clauses, and GROUP BY
         
-        For growth calculations, use this exact pattern:
-        - Use LEFT JOIN with a subquery to get previous month data
-        - Calculate growth as: ((current - previous) / previous) * 100
-        - Use CASE statements to handle division by zero
+        QUERY PATTERNS BY COMPLEXITY:
         
-        Example structure for monthly growth:
-        SELECT 
-            r.RegionName,
-            strftime('%Y-%m', d.ActualDate) as Month,
-            SUM(fs.EnergyMet) as TotalEnergyMet,
-            prev.PreviousMonthEnergy,
-            CASE 
-                WHEN prev.PreviousMonthEnergy > 0 
-                THEN ((SUM(fs.EnergyMet) - prev.PreviousMonthEnergy) / prev.PreviousMonthEnergy) * 100 
-                ELSE 0 
-            END as GrowthRate
+        FOR SIMPLE QUERIES (total, sum, single value):
+        Example: "What is total energy consumption in 2025?"
+        SELECT SUM(fs.EnergyMet) as TotalEnergyConsumption
+        FROM FactAllIndiaDailySummary fs
+        JOIN DimDates d ON fs.DateID = d.DateID
+        WHERE strftime('%Y', d.ActualDate) = '2025'
+        
+        Example: "What is energy consumption of Northern Region in 2025?"
+        SELECT SUM(fs.EnergyMet) as EnergyConsumption
         FROM FactAllIndiaDailySummary fs
         JOIN DimRegions r ON fs.RegionID = r.RegionID
         JOIN DimDates d ON fs.DateID = d.DateID
-        LEFT JOIN (
-            SELECT 
-                r2.RegionName,
-                strftime('%Y-%m', d2.ActualDate) as Month,
-                SUM(fs2.EnergyMet) as PreviousMonthEnergy
-            FROM FactAllIndiaDailySummary fs2
-            JOIN DimRegions r2 ON fs2.RegionID = r2.RegionID
-            JOIN DimDates d2 ON fs2.DateID = d2.DateID
-            WHERE strftime('%Y', d2.ActualDate) = '2024'
-            GROUP BY r2.RegionName, strftime('%Y-%m', d2.ActualDate)
-        ) prev ON r.RegionName = prev.RegionName 
-            AND strftime('%Y-%m', d.ActualDate) = date(prev.Month || '-01', '+1 month')
-        WHERE strftime('%Y', d.ActualDate) = '2024'
-        GROUP BY r.RegionName, strftime('%Y-%m', d.ActualDate)
-        ORDER BY r.RegionName, Month
+        WHERE r.RegionName = 'Northern Region' AND strftime('%Y', d.ActualDate) = '2025'
+
+        Example: "What is energy shortage in 2025?" (no state/region mentioned → default to India total)
+        SELECT SUM(fs.EnergyShortage) as TotalEnergyShortage
+        FROM FactAllIndiaDailySummary fs
+        JOIN DimRegions r ON fs.RegionID = r.RegionID
+        JOIN DimDates d ON fs.DateID = d.DateID
+        WHERE r.RegionName = 'India' AND strftime('%Y', d.ActualDate) = '2025'
+        
+        FOR BREAKDOWN QUERIES (by region/state):
+        Example: "What is energy consumption by region in 2025?"
+        SELECT r.RegionName, SUM(fs.EnergyMet) as TotalEnergyConsumption
+        FROM FactAllIndiaDailySummary fs
+        JOIN DimRegions r ON fs.RegionID = r.RegionID
+        JOIN DimDates d ON fs.DateID = d.DateID
+        WHERE strftime('%Y', d.ActualDate) = '2025'
+        GROUP BY r.RegionName
+        ORDER BY TotalEnergyConsumption DESC
+        
+        FOR TIME-SERIES QUERIES (monthly, yearly):
+        Example: "What is monthly energy consumption in 2025?"
+        SELECT strftime('%Y-%m', d.ActualDate) as Month, SUM(fs.EnergyMet) as MonthlyEnergyConsumption
+        FROM FactAllIndiaDailySummary fs
+        JOIN DimDates d ON fs.DateID = d.DateID
+        WHERE strftime('%Y', d.ActualDate) = '2025'
+        GROUP BY strftime('%Y-%m', d.ActualDate)
+        ORDER BY Month
+        
+        ONLY use complex subqueries and growth calculations when explicitly asked for growth/change rates!
         
         CRITICAL: Use the exact table names and column names from the schema:
-        - FactAllIndiaDailySummary (alias: fs) - contains EnergyMet column
+        
+        FOR REGION-LEVEL QUERIES (multiple regions):
+        - FactAllIndiaDailySummary (alias: fs) - contains EnergyMet, EnergyShortage, MaxDemandSCADA, EveningPeakDemandMet columns
         - DimRegions (alias: r) - contains RegionName column  
-        - DimDates (alias: d) - contains ActualDate column (NOT Date)
-        - Use fs.EnergyMet for energy metrics
-        - Use r.RegionName for region names
-        - Use d.ActualDate for dates (NOT d.Date)
+        - Use fs.EnergyMet for energy consumption
+        - Use fs.MaxDemandSCADA for region-level peak demand (NOT MaximumDemand)
+        - Use fs.EnergyShortage for energy shortage
+        
+        FOR STATE-LEVEL QUERIES (multiple states):
+        - FactStateDailyEnergy (alias: fs) - contains EnergyMet, MaximumDemand, EnergyShortage columns
+        - DimStates (alias: s) - contains StateName column
+        - Use fs.EnergyMet for energy consumption  
+        - Use fs.MaximumDemand for state-level peak demand
+        - Use fs.EnergyShortage for energy shortage
+        
+        COMMON:
+        - DimDates (alias: d) - contains ActualDate column (NOT Date, NOT Year)
+        - Use d.ActualDate for dates (NOT d.Date, NOT d.Year)
+        - For year filtering: WHERE strftime('%Y', d.ActualDate) = '2025'
+        - For month filtering: WHERE strftime('%Y-%m', d.ActualDate) = '2025-01'
         - Use fs.RegionID for joining with DimRegions
+        - Use fs.StateID for joining with DimStates  
         - Use fs.DateID for joining with DimDates
-        - Use fs2.RegionID and fs2.DateID for subquery joins
+        
+        IMPORTANT: Do NOT mix state and region tables! Choose ONE based on the query:
+        - For "states in region" queries → Use FactStateDailyEnergy + DimStates + JOIN with DimRegions  
+        - For "regions" queries → Use FactAllIndiaDailySummary + DimRegions
+        
+        NEVER use columns like f.Year, f.Month, d.Year, d.Month - these do not exist!
+        NEVER use fs.MaximumDemand with FactAllIndiaDailySummary - use fs.MaxDemandSCADA!
+        NEVER use fs.MaxDemandSCADA with FactStateDailyEnergy - use fs.MaximumDemand!
+        ALWAYS use strftime() functions for date extraction.
+
+        METRIC/TABLE SELECTION RULES:
+        - If the query mentions a state or implies states-in-region: use FactStateDailyEnergy (fs) + DimStates (s). Metrics: fs.MaximumDemand (peak), fs.EnergyMet (consumption), fs.EnergyShortage (energy shortage)
+        - If the query mentions a region, India, or no entity: use FactAllIndiaDailySummary (fs) + DimRegions (r). Metrics: fs.MaxDemandSCADA (peak), fs.EnergyMet (consumption), fs.EnergyShortage (energy shortage)
+        - If the query mentions shortage with no entity: return All-India total → SUM(fs.EnergyShortage) with r.RegionName = 'India'
         
         IMPORTANT: All JOINs must use the correct foreign key relationships:
         - JOIN DimRegions r ON fs.RegionID = r.RegionID
@@ -690,13 +727,28 @@ class WrenAIIntegration:
         
         Generate a complete SQL query that:
         1. Starts with SELECT and includes all necessary clauses
-        2. Uses the appropriate MDL models and relationships
-        3. Follows the business semantics
-        4. Includes proper joins based on the relationships
-        5. Handles the business entities correctly
-        6. Uses SQLite-compatible syntax only
-        7. Is complete and executable
-        8. Uses the exact table and column names specified above
+        2. Uses the SIMPLEST pattern that answers the question - avoid unnecessary complexity
+        3. Uses the appropriate MDL models and relationships
+        4. Follows the business semantics
+        5. Includes proper joins based on the relationships
+        6. Handles the business entities correctly
+        7. Uses SQLite-compatible syntax only
+        8. Is complete and executable
+        9. Uses the exact table and column names specified above
+        10. AVOID subqueries unless explicitly needed for growth/comparison calculations
+        
+        MANDATORY JOIN REQUIREMENTS:
+        - ALWAYS JOIN DimDates when filtering by year, month, or any date
+        - ALWAYS JOIN DimRegions when filtering by region name
+        - ALWAYS JOIN DimStates when filtering by state name
+        - Use consistent table aliases: fs (fact), r (regions), s (states), d (dates)
+        
+        DEFAULT ENTITY HANDLING:
+        - If the query does NOT mention a specific state or region and asks for shortage/consumption, return the All-India total
+        - Use FactAllIndiaDailySummary with JOIN DimRegions and filter r.RegionName = 'India'
+        - For 'energy shortage' use fs.EnergyShortage; for 'peak shortage' use fs.PeakShortage
+        
+        IMPORTANT: Start with the simplest query pattern first. Only add complexity if required by the question.
         
         Return only the SQL query without any explanation, formatting, or code blocks:
         """

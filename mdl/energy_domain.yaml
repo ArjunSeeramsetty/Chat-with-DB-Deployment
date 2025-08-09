@@ -21,20 +21,28 @@ models:
         primary_key: false
       EnergyMet:
         type: "decimal"
-        description: "Energy met in MWh"
+        description: "Energy met in MU"
         business_metric: true
-      EnergyRequirement:
+      EveningPeakDemandMet:
         type: "decimal"
-        description: "Energy requirement in MWh"
+        description: "Evening peak demand met in MW"
         business_metric: true
-      Surplus:
+      PeakShortage:
         type: "decimal"
-        description: "Energy surplus in MWh"
+        description: "Peak shortage in MW"
         business_metric: true
-      Deficit:
+      EnergyShortage:
         type: "decimal"
-        description: "Energy deficit in MWh"
+        description: "Energy shortage in MU"
         business_metric: true
+      MaxDemandSCADA:
+        type: "decimal"
+        description: "Maximum demand recorded by SCADA in MW"
+        business_metric: true
+      TimeOfMaxDemandMet:
+        type: "text"
+        description: "Time when maximum demand was met"
+        business_metric: false
     metadata:
       business_name: "National Energy Summary"
       data_source: "Power System Operation Corporation"
@@ -54,15 +62,27 @@ models:
         primary_key: false
       EnergyMet:
         type: "decimal"
-        description: "Energy met in MWh"
+        description: "Energy met in MU"
         business_metric: true
-      EnergyConsumption:
+      MaximumDemand:
         type: "decimal"
-        description: "Energy consumption in MWh"
+        description: "Maximum demand in MW"
         business_metric: true
-      PeakDemand:
+      Shortage:
         type: "decimal"
-        description: "Peak demand in MW"
+        description: "Power shortage in MW"
+        business_metric: true
+      EnergyShortage:
+        type: "decimal"
+        description: "Energy shortage in MU"
+        business_metric: true
+      DrawalSchedule:
+        type: "decimal"
+        description: "Scheduled drawal in MU"
+        business_metric: true
+      OverUnderDrawal:
+        type: "decimal"
+        description: "Over/under drawal in MU"
         business_metric: true
     metadata:
       business_name: "State Energy Data"
@@ -87,7 +107,7 @@ models:
         primary_key: false
       GenerationAmount:
         type: "decimal"
-        description: "Generation amount in MWh"
+        description: "Generation amount in MU"
         business_metric: true
       Capacity:
         type: "decimal"
@@ -177,8 +197,15 @@ business_glossary:
 # Semantic mappings
 semantic_mappings:
   energy_consumption: "EnergyMet"
-  energy_demand: "EnergyRequirement"
-  energy_supply: "EnergyMet"
-  power_generation: "GenerationAmount"
+  energy_demand: "EnergyMet"
+  energy_supply: "GenerationAmount"
+  total_generation: "GenerationAmount"
   capacity_factor: "PLF"
-  peak_power: "PeakDemand" 
+  peak_power_state: "MaximumDemand"
+  peak_power_region: "MaxDemandSCADA"
+  peak_demand_state: "MaximumDemand"
+  peak_demand_region: "MaxDemandSCADA"
+  maximum_demand_region: "MaxDemandSCADA"
+  maximum_demand_state: "MaximumDemand"
+  energy_shortage: "EnergyShortage"
+  power_shortage: "Shortage" 

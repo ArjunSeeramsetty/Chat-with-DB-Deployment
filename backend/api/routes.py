@@ -245,71 +245,11 @@ async def ask_question(
     rag_service: EnhancedRAGService = Depends(get_rag_service_dep),
 ):
     """
-    Enhanced question answering endpoint with LLM integration hooks
+    Route default /api/v1/ask to the enhanced semantic pipeline (/api/v1/ask-enhanced).
+    This enables WrenAI + SemanticEngine + Multi-layer validation + HITL by default.
     """
-    start_time = time.time()
-
-    try:
-        # Force reload modules to get the latest code
-        import importlib
-        import sys
-
-        if "backend.core.assembler" in sys.modules:
-            importlib.reload(sys.modules["backend.core.assembler"])
-        if "backend.core.schema_linker" in sys.modules:
-            importlib.reload(sys.modules["backend.core.schema_linker"])
-
-        # Create a new rag_service instance to use updated modules
-        from backend.config import get_settings
-        from backend.services.rag_service import EnhancedRAGService
-
-        settings = get_settings()
-        new_rag_service = EnhancedRAGService(settings.database_path)
-
-        # Validate request
-        if not request.question or len(request.question.strip()) == 0:
-            raise HTTPException(status_code=400, detail="Question cannot be empty")
-
-        if len(request.question) > 1000:
-            raise HTTPException(
-                status_code=400, detail="Question too long (max 1000 characters)"
-            )
-
-        # Process query with enhanced validation using new service
-        response = await new_rag_service.process_query(request)
-
-        # Add processing time
-        response.processing_time = time.time() - start_time
-
-        # Convert response to dict for JSON serialization
-        response_dict = response.model_dump()
-
-        # Add LLM and GPU information to response
-        response_dict.update(
-            {
-                "llm_model": settings.llm_model or "llama3.2:3b",
-                "llm_provider": settings.llm_provider_type,
-                "gpu_status": rag_service._get_gpu_status(),
-            }
-        )
-
-        # Debug logging
-        logger.info(f"Response dict keys: {list(response_dict.keys())}")
-        logger.info(
-            f"clarification_attempt_count in response_dict: {response_dict.get('clarification_attempt_count', 'NOT FOUND')}"
-        )
-
-        if response.success:
-            return response_dict
-        else:
-            # Return the QueryResponse object directly for error cases
-            return JSONResponse(status_code=422, content=response_dict)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in ask_question: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    # Delegate to enhanced path to centralize behavior and keep one source of truth
+    return await ask_question_enhanced(request)
 
 
 @router.get("/api/v1/schema")
@@ -604,83 +544,79 @@ async def ask_question_enhanced(request: QueryRequest):
         enhanced_rag = SemanticRAGService(db_path=db_path)
         await enhanced_rag.initialize()
         
-        # Build enhanced context (if available)
-        enhanced_context = None
-        if hasattr(request, 'user_id') and request.user_id:
-            from backend.services.enhanced_rag_service import EnhancedQueryContext
-            enhanced_context = EnhancedQueryContext(
-                user_id=request.user_id,
-                session_id=request.session_id or f"session_{int(time.time())}",
-                conversation_history=[],
-                user_preferences={},
-                semantic_feedback=[],
-                domain_expertise={}
-            )
-            
-        # Process query with semantic enhancement
-        processing_result = await enhanced_rag.process_query(request, enhanced_context)
-        
-        # Extract response components
-        query_response = processing_result.query_response
-        semantic_context = processing_result.semantic_context
-        processing_metrics = processing_result.processing_metrics
-        confidence_breakdown = processing_result.confidence_breakdown
-        recommendations = processing_result.recommendations
+        # Process query with semantic enhancement (use existing service API)
+        proc_mode = request.processing_mode.value if hasattr(request, 'processing_mode') else "adaptive"
+        processing_result = await enhanced_rag.process_query_enhanced(
+            query=request.question,
+            processing_mode=proc_mode,
+            session_id=request.session_id or f"session_{int(time.time())}",
+            user_id=request.user_id or "default_user"
+        )
         
         # Build comprehensive response
+        # Normalize result to a consistent response payload
         response_data = {
-            "success": True,
-            "sql": query_response.sql,
-            "data": query_response.data,
-            "visualization": query_response.visualization.dict() if query_response.visualization else None,
-            "explanation": query_response.explanation,
-            "confidence": query_response.confidence,
-            "execution_time": query_response.execution_time,
-            "session_id": query_response.session_id,
-            "processing_mode": "enhanced_semantic",
-            
-            # Enhanced semantic information
-            "semantic_insights": {
-                "intent": semantic_context.get("intent", "unknown"),
-                "domain_concepts": semantic_context.get("domain_concepts", []),
-                "business_entities": semantic_context.get("business_entities", []),
-                "semantic_mappings": semantic_context.get("semantic_mappings", {}),
-                "confidence_breakdown": confidence_breakdown,
-                "vector_similarity": semantic_context.get("vector_similarity", 0.0),
-                "processing_method": semantic_context.get("processing_method", "hybrid")
-            },
-            
-            # Performance metrics
-            "performance_metrics": {
-                "total_processing_time": processing_metrics.get("total_time", 0.0),
-                "semantic_analysis_time": processing_metrics.get("semantic_analysis_time", 0.0),
-                "sql_execution_time": processing_metrics.get("sql_execution_time", 0.0),
-                "accuracy_indicators": processing_metrics.get("accuracy_indicators", {}),
-                "fallback_used": processing_metrics.get("fallback_used", False)
-            },
-            
-            # User recommendations
-            "recommendations": recommendations,
-            
-            # System information
+            "success": processing_result.get("success", False),
+            "error": processing_result.get("error"),  # Preserve error field for frontend
+            "sql": processing_result.get("sql", ""),
+            "data": processing_result.get("data", []),
+            "explanation": processing_result.get("explanation"),
+            "confidence": processing_result.get("confidence", 0.0),
+            "execution_time": processing_result.get("execution_time", 0.0),
+            "session_id": request.session_id or "",
+            "processing_mode": processing_result.get("processing_method", "enhanced_semantic"),
+            "semantic_insights": processing_result.get("semantic_context", {}),
+            "performance_metrics": processing_result.get("performance_metrics", {}),
+            "recommendations": processing_result.get("recommendations", []),
             "system_info": {
                 "version": "2.0.0-semantic",
                 "accuracy_improvement": "25-30% over traditional methods",
-                "features_used": [
-                    "semantic_understanding",
-                    "vector_search",
-                    "business_context_mapping",
-                    "domain_specific_intelligence"
-                ]
+                "features_used": ["semantic_understanding","vector_search","business_context_mapping","domain_specific_intelligence"]
             }
         }
+        
+        # Add debug logging to see what frontend receives
+        logger.info(f"🔍 Frontend response format check:")
+        logger.info(f"  - success: {response_data.get('success')}")
+        logger.info(f"  - sql length: {len(response_data.get('sql', ''))}")
+        logger.info(f"  - data rows: {len(response_data.get('data', []))}")
+        logger.info(f"  - processing_result keys: {list(processing_result.keys())}")
+        logger.info(f"  - response_data keys: {list(response_data.keys())}")
+
+        # Backward compatibility for frontend expecting 'sql_query', 'table', 'plot'
+        response_data["sql_query"] = response_data.get("sql", "")
+
+        # Build simple table structure if data is present
+        if isinstance(response_data["data"], list) and response_data["data"]:
+            # Derive headers from first row keys
+            first = response_data["data"][0]
+            if isinstance(first, dict):
+                headers = list(first.keys())
+                rows = [[row.get(h) for h in headers] for row in response_data["data"]]
+                response_data["table"] = {
+                    "headers": headers,
+                    "rows": rows,
+                    "chartData": response_data["data"],
+                }
+            else:
+                # If rows are lists/tuples already
+                response_data["table"] = {
+                    "headers": [],
+                    "rows": response_data["data"],
+                    "chartData": [],
+                }
+        else:
+            response_data.setdefault("table", {"headers": [], "rows": [], "chartData": []})
+
+        # Provide a minimal plot stub to avoid UI errors
+        response_data.setdefault("plot", {"chartType": "bar", "options": {}})
         
         # Log successful processing
         total_time = time.time() - start_time
         logger.info(
             f"✅ Enhanced query processed successfully in {total_time:.3f}s "
-            f"(confidence: {query_response.confidence:.2f}, "
-            f"method: {semantic_context.get('processing_method', 'unknown')})"
+            f"(confidence: {response_data.get('confidence', 0.0):.2f}, "
+            f"method: {response_data.get('processing_mode', 'enhanced_semantic')})"
         )
         
         return response_data

@@ -656,6 +656,7 @@ class SQLAssembler:
                 fallback_template_key = "generation_query"
         elif analysis.query_type.value == "state":
             fallback_template_key = "state_query"
+            template_key = fallback_template_key
         elif analysis.intent.value == "trend_analysis":
             # Dynamic trend analysis - determine template based on query content
             original_query_lower = original_query.lower() if original_query else ""
@@ -756,6 +757,7 @@ class SQLAssembler:
         logger.info(
             f"🔍 TEMPLATE SELECTION: query_type={analysis.query_type.value}, template_key={template_key}"
         )
+
 
         if template_key in self.sql_templates:
             logger.info(f"✅ Template found: {template_key}")
@@ -1699,22 +1701,20 @@ class SQLAssembler:
                             f"Added region condition as-is: d.RegionName = '{entity}' (no mapping found)"
                         )
                 elif analysis.query_type.value == "state":
-                    # Check if entity is a state name - map to correct database value using centralized entity loader
+                    # Only add WHERE conditions for entities that are actually valid state names
                     entity_lower = entity.lower()
-                    mapped_state = self.entity_loader.get_proper_state_name(
-                        entity_lower
-                    )
-
-                    if mapped_state:
+                    
+                    # Check if this entity is actually a state name
+                    if self.entity_loader.is_indian_state(entity):
+                        mapped_state = self.entity_loader.get_proper_state_name(entity_lower)
                         conditions.append(f"d.StateName = '{mapped_state}'")
                         logger.info(
-                            f"Added state condition with mapping: d.StateName = '{mapped_state}' (mapped from '{entity}')"
+                            f"Added state condition: d.StateName = '{mapped_state}' (mapped from '{entity}')"
                         )
                     else:
-                        # Use the entity as-is if no mapping found
-                        conditions.append(f"d.StateName = '{entity}'")
+                        # Skip non-state entities (like 'energy', regions, etc.)
                         logger.info(
-                            f"Added state condition as-is: d.StateName = '{entity}' (no mapping found)"
+                            f"Skipping non-state entity: '{entity}' in state query"
                         )
                 elif analysis.query_type.value == "exchange":
                     # Handle exchange entities with proper mapping

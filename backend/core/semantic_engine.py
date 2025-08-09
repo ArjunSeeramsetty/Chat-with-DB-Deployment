@@ -125,9 +125,26 @@ class SemanticEngine:
             
     async def initialize(self):
         """Initialize the semantic engine with domain knowledge"""
+        # Ensure vector store collections exist and are populated
+        try:
+            self._initialize_vector_store()
+        except Exception as e:
+            logger.warning(f"Vector store init warning: {e}")
+
         await self._load_domain_model()
-        await self._populate_vector_store()
+        try:
+            await self._populate_vector_store()
+        except Exception as e:
+            logger.warning(f"Populate vector store warning: {e}")
         logger.info("Semantic engine initialized successfully")
+
+    async def get_schema_metadata(self) -> Dict[str, Any]:
+        """Async wrapper to return schema metadata used by enhanced services."""
+        try:
+            return self._get_schema_info()
+        except Exception as e:
+            logger.warning(f"get_schema_metadata failed: {e}")
+            return {}
         
     def _get_schema_info(self) -> Dict[str, Any]:
         """Get schema information for validation"""
@@ -135,7 +152,13 @@ class SemanticEngine:
             return {}
         
         try:
-            return self.schema_extractor.extract_schema_metadata()
+            # Use the available API on SchemaMetadataExtractor
+            if hasattr(self.schema_extractor, "get_schema_metadata"):
+                return self.schema_extractor.get_schema_metadata()
+            # Backwards compatibility
+            if hasattr(self.schema_extractor, "extract_schema_metadata"):
+                return self.schema_extractor.extract_schema_metadata()
+            return {}
         except Exception as e:
             logger.warning(f"Failed to extract schema info: {e}")
             return {}

@@ -1,0 +1,22 @@
+warning: in the working copy of 'Implementations.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/api/deps.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/core/assembler.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/core/entity_loader.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/core/intent.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/core/semantic_engine.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/services/rag_service.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'config/business_rules.yaml', LF will be replaced by CRLF the next time Git touches it
+Implementations.md
+TODO.md
+backend/api/__pycache__/deps.cpython-311.pyc
+backend/api/deps.py
+backend/core/assembler.py
+backend/core/entity_loader.py
+backend/core/intent.py
+backend/core/semantic_engine.py
+backend/energy_data.db
+backend/services/rag_service.py
+config/business_rules.yaml
+test_advanced_retrieval.py
+test_constrained_sql_generation.py
+test_feedback_system.py

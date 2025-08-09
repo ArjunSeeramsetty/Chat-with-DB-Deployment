@@ -123,6 +123,23 @@ class IntentAnalyzer:
             )
             return QueryType.REGION
 
+        # Check for "states in region" patterns FIRST - these should be STATE queries not REGION
+        # This needs to come before demand keywords to override them
+        states_in_region_patterns = [
+            "states in",
+            "all states in", 
+            "all the states in",
+            "states of",
+            "all states of",
+            "states within",
+            "states from"
+        ]
+        if any(pattern in query_lower for pattern in states_in_region_patterns):
+            logger.info(
+                f"'States in region' pattern detected in query, returning STATE query type"
+            )
+            return QueryType.STATE
+
         # Check for demand keywords - these should also use region-level data for peak demand
         demand_keywords = [
             "peak demand",
@@ -569,10 +586,23 @@ Return ONLY the JSON object, no explanations or code:"""
             # Sort by descending key length to prefer longer matches (e.g., "north eastern region" before "north")
             for alias in sorted(region_mappings.keys(), key=len, reverse=True):
                 alias_lower = alias.lower()
-                if alias_lower and alias_lower in query_lower:
-                    canonical = region_mappings[alias]
-                    if canonical not in entities:
-                        entities.append(canonical)
+                if alias_lower:
+                    # Use word boundary matching to avoid false positives like "er" in "andhra pradesh"
+                    # For single-letter or very short aliases, only match if they are standalone words
+                    if len(alias_lower) <= 3:
+                        # For short aliases, use word boundaries to ensure they're standalone
+                        import re
+                        pattern = r'\b' + re.escape(alias_lower) + r'\b'
+                        if re.search(pattern, query_lower):
+                            canonical = region_mappings[alias]
+                            if canonical not in entities:
+                                entities.append(canonical)
+                    else:
+                        # For longer aliases, use substring matching as before
+                        if alias_lower in query_lower:
+                            canonical = region_mappings[alias]
+                            if canonical not in entities:
+                                entities.append(canonical)
 
         # Extract states using centralized entity loader
         indian_states = self.entity_loader.get_indian_states()
