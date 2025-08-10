@@ -40,6 +40,14 @@ const QueryInput = ({
           placeholder="Ask a question about power data... (e.g., 'What is the energy shortage of Maharashtra in July 2025?')"
           value={question}
           onChange={(e) => onQuestionChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              if (!loading && question.trim() && backendStatus === 'healthy') {
+                onAsk();
+              }
+            }
+          }}
           disabled={loading}
           sx={{ 
             backgroundColor: 'white',

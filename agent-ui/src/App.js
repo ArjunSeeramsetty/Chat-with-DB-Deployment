@@ -191,6 +191,9 @@ function App() {
           onClarificationResponse={handleClarificationResponse}
           onClarificationChange={handleClarificationChange}
           onCancel={handleClarificationCancel}
+          listening={listening}
+          onStartListening={handleStartListening}
+          onStopListening={handleStopListening}
         />
       )}
 

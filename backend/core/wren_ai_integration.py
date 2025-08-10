@@ -701,6 +701,7 @@ class WrenAIIntegration:
         - Use d.ActualDate for dates (NOT d.Date, NOT d.Year)
         - For year filtering: WHERE strftime('%Y', d.ActualDate) = '2025'
         - For month filtering: WHERE strftime('%Y-%m', d.ActualDate) = '2025-01'
+            - For monthly average requests: include month in SELECT using strftime('%Y-%m', d.ActualDate) AS Month, then GROUP BY Month and use AVG(...) for metrics
         - Use fs.RegionID for joining with DimRegions
         - Use fs.StateID for joining with DimStates  
         - Use fs.DateID for joining with DimDates

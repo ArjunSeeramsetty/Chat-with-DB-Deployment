@@ -107,7 +107,7 @@ class EnhancedRAGService:
             )
 
             # Check if we've exceeded the maximum clarification attempts
-            if request.clarification_attempt_count >= 3:
+            if request.clarification_attempt_count >= 2:
                 response = QueryResponse(
                     success=False,
                     error="Maximum clarification attempts reached. Proper context was not provided.",
@@ -132,6 +132,8 @@ class EnhancedRAGService:
                 enhanced_question = self._enhance_question_with_clarification(
                     request.question, request.clarification_answers
                 )
+                # Persist enhanced question for downstream steps to use
+                request.question = enhanced_question
                 logger.info(f"Enhanced question: {enhanced_question}")
             else:
                 enhanced_question = request.question
@@ -700,6 +702,8 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                         )
 
                         clarification_prompt = f"""You are helping clarify a database query about energy data. 
+
+IMPORTANT: Do not ask about things that are explicitly mentioned in the original query. If a time granularity like 'monthly', 'weekly', 'daily', 'quarterly', or 'yearly' is present, do NOT ask about time granularity. Only ask about the most critical missing piece (e.g., metric ambiguity like 'demand' meaning power vs energy) that is not explicitly specified.
 
 ORIGINAL QUERY: "{query}"
 
@@ -2249,11 +2253,11 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 join_table = "DimStates"
                 join_col = "StateID"
             else:
-                # Default to state table
-                table = "FactStateDailyEnergy"
-                name_col = "StateName"
-                join_table = "DimStates"
-                join_col = "StateID"
+                # Default to region-level All-India summary when no explicit entity
+                table = "FactAllIndiaDailySummary"
+                name_col = "RegionName"
+                join_table = "DimRegions"
+                join_col = "RegionID"
 
             # Use schema linker to get the correct column - NO FALLBACKS
             if hasattr(self, "schema_linker") and self.schema_linker:
@@ -2344,6 +2348,9 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                                     
             # Build complete WHERE clause
             where_conditions = [f"dt.Year = {year}"]
+            # If no explicit entities and we're using region-level table, default to India
+            if (not analysis.entities) and table == "FactAllIndiaDailySummary":
+                where_conditions.append("d.RegionName = 'India'")
             where_conditions.extend(entity_conditions)
             
             # Special handling for "states in region" queries

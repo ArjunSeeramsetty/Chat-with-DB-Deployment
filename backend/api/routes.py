@@ -37,6 +37,7 @@ class FeedbackRequest(BaseModel):
 
 # Global agentic RAG service instance
 _agentic_rag_service: Optional[AgenticRAGService] = None
+_enhanced_rag_service: Optional[SemanticRAGService] = None
 
 
 def get_agentic_rag_service() -> AgenticRAGService:
@@ -46,6 +47,15 @@ def get_agentic_rag_service() -> AgenticRAGService:
         settings = get_settings()
         _agentic_rag_service = AgenticRAGService(settings.database_path)
     return _agentic_rag_service
+
+
+def get_enhanced_rag_service() -> SemanticRAGService:
+    """Get or create a singleton enhanced RAG service instance"""
+    global _enhanced_rag_service
+    if _enhanced_rag_service is None:
+        settings = get_settings()
+        _enhanced_rag_service = SemanticRAGService(db_path=settings.database_path)
+    return _enhanced_rag_service
 
 
 @router.get("/api/v1/health")
@@ -248,8 +258,17 @@ async def ask_question(
     Route default /api/v1/ask to the enhanced semantic pipeline (/api/v1/ask-enhanced).
     This enables WrenAI + SemanticEngine + Multi-layer validation + HITL by default.
     """
-    # Delegate to enhanced path to centralize behavior and keep one source of truth
-    return await ask_question_enhanced(request)
+    # Delegate to enhanced path; if it fails, fallback to fixed/traditional path automatically
+    enhanced_resp = await ask_question_enhanced(request)
+    try:
+        if isinstance(enhanced_resp, dict) and not enhanced_resp.get("success", False):
+            # Fallback to fixed/traditional endpoint
+            fallback_resp = await ask_question_fixed(request)
+            return fallback_resp
+        return enhanced_resp
+    except Exception:
+        # On any unexpected error, attempt fixed fallback
+        return await ask_question_fixed(request)
 
 
 @router.get("/api/v1/schema")
@@ -540,8 +559,8 @@ async def ask_question_enhanced(request: QueryRequest):
         settings = get_settings()
         db_path = settings.database_path
         
-        # Initialize enhanced RAG service
-        enhanced_rag = SemanticRAGService(db_path=db_path)
+        # Initialize/reuse enhanced RAG service (singleton to avoid re-initialization per request)
+        enhanced_rag = get_enhanced_rag_service()
         await enhanced_rag.initialize()
         
         # Process query with semantic enhancement (use existing service API)
@@ -979,18 +998,20 @@ async def ask_question_agentic(request: QueryRequest):
             workflow_id="standard_query_processing"
         )
         
-        # Build response
+        # Build response (normalize fields for frontend)
         response_data = {
             "success": result.query_response.success,
-            "sql": result.query_response.sql,
+            "sql": getattr(result.query_response, "sql_query", ""),
+            "sql_query": getattr(result.query_response, "sql_query", ""),
             "data": result.query_response.data,
-            "visualization": result.query_response.visualization.model_dump() if result.query_response.visualization else None,
-            "explanation": result.query_response.explanation,
-            "confidence": result.query_response.confidence,
-            "execution_time": result.query_response.execution_time,
-            "session_id": result.query_response.session_id,
+            "plot": (result.query_response.plot if hasattr(result.query_response, "plot") else None),
+            "visualization": (result.query_response.visualization.model_dump() if getattr(result.query_response, "visualization", None) else None),
+            "explanation": getattr(result.query_response, "explanation", None),
+            "confidence": getattr(result.query_response, "confidence", 0.0),
+            "execution_time": getattr(result.query_response, "execution_time", 0.0),
+            "session_id": getattr(result.query_response, "session_id", None),
             "processing_mode": "agentic_workflow",
-            "row_count": result.query_response.row_count,
+            "row_count": getattr(result.query_response, "row_count", 0),
             
             # Agentic-specific information
             "workflow_id": result.workflow_context.workflow_id,

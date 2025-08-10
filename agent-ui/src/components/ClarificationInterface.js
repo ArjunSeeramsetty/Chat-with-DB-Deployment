@@ -7,6 +7,8 @@ import {
   Button,
   CircularProgress,
 } from '@mui/material';
+import MicIcon from '@mui/icons-material/Mic';
+import MicOffIcon from '@mui/icons-material/MicOff';
 
 const ClarificationInterface = ({ 
   clarificationQuestion, 
@@ -14,7 +16,11 @@ const ClarificationInterface = ({
   loading, 
   onClarificationResponse, 
   onClarificationChange, 
-  onCancel 
+  onCancel,
+  // Optional voice control props (hooked from parent if provided)
+  listening = false,
+  onStartListening = () => {},
+  onStopListening = () => {}
 }) => {
   return (
     <Paper style={{ padding: 16, marginBottom: 16, backgroundColor: '#fff3cd', border: '1px solid #ffeaa7' }}>
@@ -42,6 +48,14 @@ const ClarificationInterface = ({
               placeholder="Type your clarification here..."
               value={clarificationAnswer || ""}
               onChange={(e) => onClarificationChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!loading && (clarificationAnswer || '').trim()) {
+                    onClarificationResponse();
+                  }
+                }
+              }}
               sx={{ 
                 backgroundColor: 'white',
                 '& .MuiOutlinedInput-root': {
@@ -54,6 +68,15 @@ const ClarificationInterface = ({
                 }
               }}
             />
+            {/* Voice input toggle for clarification */}
+            <Button
+              variant="outlined"
+              color={listening ? "error" : "primary"}
+              onClick={listening ? onStopListening : onStartListening}
+              sx={{ minWidth: 56, height: 56 }}
+            >
+              {listening ? <MicOffIcon /> : <MicIcon />}
+            </Button>
             <Button
               variant="contained"
               color="primary"

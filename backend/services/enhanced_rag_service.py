@@ -259,6 +259,7 @@ class EnhancedRAGService:
         - Fix mixed aliases like f.Fs. -> fs.
         - Inject JOINs for d./r./s. aliases when missing.
         - Remove stray GROUP BY/ORDER BY if only aggregates are selected.
+        - If query implies monthly (e.g., contains 'monthly' and 'average'), ensure monthly grouping present.
         """
         try:
             import re
@@ -306,6 +307,31 @@ class EnhancedRAGService:
                 if only_aggs:
                     repaired = re.sub(r"GROUP\s+BY\s+[^;]+", "", repaired, flags=re.IGNORECASE)
                     repaired = re.sub(r"ORDER\s+BY\s+[^;]+", "", repaired, flags=re.IGNORECASE)
+
+            # 4) Enforce monthly grouping if hinted by query content captured earlier in pipeline
+            # We infer from existing SQL: if it filters a full year and uses aggregate without any Month grouping, add Month
+            if (
+                "strftime('%Y', d.ActualDate)" in repaired
+                and re.search(r"\b(AVG|SUM|MAX|MIN)\s*\(", repaired, re.IGNORECASE)
+                and "dt.Month" not in repaired and "strftime('%m'" not in repaired
+            ):
+                # Inject dt.Month into SELECT, GROUP BY, ORDER BY
+                # Ensure DimDates alias is dt or d; normalize to dt
+                repaired = re.sub(r"\bJOIN\s+DimDates\s+([a-zA-Z]\w*)\b", "JOIN DimDates dt", repaired, flags=re.IGNORECASE)
+                # Add Month to SELECT list after first SELECT clause (support multiline)
+                repaired = re.sub(r"(SELECT\s+)(.+?)(\s+FROM)", r"\1\2, dt.Month\3", repaired, flags=re.IGNORECASE|re.DOTALL)
+                # Add GROUP BY dt.Month if GROUP BY present, else create one with any name column if present
+                if re.search(r"GROUP\s+BY", repaired, re.IGNORECASE):
+                    repaired = re.sub(r"GROUP\s+BY\s+", "GROUP BY dt.Month, ", repaired, flags=re.IGNORECASE)
+                else:
+                    # Try to detect a name column alias d./r./s. name
+                    name_group = "r.RegionName"
+                    if "s.StateName" in repaired:
+                        name_group = "s.StateName"
+                    repaired = re.sub(r"(WHERE\s+[^;]+)", r"\1 GROUP BY " + name_group + ", dt.Month", repaired, flags=re.IGNORECASE)
+                # Ensure ORDER BY dt.Month exists
+                if not re.search(r"ORDER\s+BY", repaired, re.IGNORECASE):
+                    repaired += " ORDER BY dt.Month"
 
             return repaired.strip()
         except Exception:
@@ -423,22 +449,117 @@ class EnhancedRAGService:
                     f"WHERE {where_clause}"
                 )
 
-            def build_region_sql(region_name: str, metric: str) -> str:
-                agg = "MAX" if metric == "MaxDemandSCADA" else "SUM"
-                alias = "MaxDemand" if metric == "MaxDemandSCADA" else ("TotalEnergyShortage" if metric == "EnergyShortage" else "TotalEnergyConsumption")
+            def build_region_sql(region_name: str, metric: str, *, monthly: bool = False, use_avg: bool = False) -> str:
+                # Determine aggregation and alias
+                if metric == "MaxDemandSCADA":
+                    agg = "MAX"
+                    alias = "MaxDemand"
+                else:
+                    agg = "AVG" if use_avg else "SUM"
+                    if metric == "EnergyShortage":
+                        alias = "AvgEnergyShortage" if use_avg else "TotalEnergyShortage"
+                    else:
+                        alias = "AvgEnergyDemand" if use_avg else "TotalEnergyConsumption"
+
                 where_parts = [f"r.RegionName = '{region_name}'"]
                 if year_val:
                     where_parts.append(f"strftime('%Y', d.ActualDate) = '{year_val}'")
                 where_clause = " AND ".join(where_parts)
-                return (
-                    f"SELECT {agg}(fs.{metric}) AS {alias} "
-                    f"FROM FactAllIndiaDailySummary fs "
-                    f"JOIN DimRegions r ON fs.RegionID = r.RegionID "
-                    f"JOIN DimDates d ON fs.DateID = d.DateID "
-                    f"WHERE {where_clause}"
-                )
 
-            if detected_states:
+                if monthly:
+                    return (
+                        "SELECT strftime('%Y-%m', d.ActualDate) AS Month, "
+                        f"ROUND({agg}(fs.{metric}), 2) AS {alias} "
+                        "FROM FactAllIndiaDailySummary fs "
+                        "JOIN DimRegions r ON fs.RegionID = r.RegionID "
+                        "JOIN DimDates d ON fs.DateID = d.DateID "
+                        f"WHERE {where_clause} "
+                        "GROUP BY Month "
+                        "ORDER BY Month"
+                    )
+                else:
+                    return (
+                        f"SELECT {agg}(fs.{metric}) AS {alias} "
+                        "FROM FactAllIndiaDailySummary fs "
+                        "JOIN DimRegions r ON fs.RegionID = r.RegionID "
+                        "JOIN DimDates d ON fs.DateID = d.DateID "
+                        f"WHERE {where_clause}"
+                    )
+
+            # Interpret intent for grouping/aggregation
+            wants_monthly = ("monthly" in ql) or ("per month" in ql) or ("by month" in ql)
+            wants_average = ("average" in ql) or ("avg" in ql) or ("mean" in ql)
+            wants_all_regions = any(p in ql for p in ["all regions", "across regions", "by region", "regionwise", "region wise"])
+            wants_all_states = any(p in ql for p in ["all states", "across states", "by state", "statewise", "state wise"])
+
+            # Helpers to build ALL-regions/states grouped SQL
+            def build_all_regions_sql(metric: str, monthly: bool, use_avg: bool) -> str:
+                agg = "AVG" if use_avg else "SUM"
+                alias = ("AvgEnergyShortage" if use_avg else "TotalEnergyShortage") if metric == "EnergyShortage" else ("AvgEnergyDemand" if use_avg else "TotalEnergyConsumption")
+                where_year = f"WHERE strftime('%Y', d.ActualDate) = '{year_val}'" if year_val else ""
+                if monthly:
+                    return (
+                        "SELECT r.RegionName, strftime('%Y-%m', d.ActualDate) AS Month, "
+                        f"ROUND({agg}(fs.{metric}), 2) AS {alias} "
+                        "FROM FactAllIndiaDailySummary fs "
+                        "JOIN DimRegions r ON fs.RegionID = r.RegionID "
+                        "JOIN DimDates d ON fs.DateID = d.DateID "
+                        f"{where_year} "
+                        "GROUP BY r.RegionName, Month "
+                        "ORDER BY r.RegionName, Month"
+                    )
+                else:
+                    return (
+                        "SELECT r.RegionName, "
+                        f"ROUND({agg}(fs.{metric}), 2) AS {alias} "
+                        "FROM FactAllIndiaDailySummary fs "
+                        "JOIN DimRegions r ON fs.RegionID = r.RegionID "
+                        "JOIN DimDates d ON fs.DateID = d.DateID "
+                        f"{where_year} "
+                        "GROUP BY r.RegionName "
+                        "ORDER BY r.RegionName"
+                    )
+
+            def build_all_states_sql(metric: str, monthly: bool, use_avg: bool) -> str:
+                agg = "AVG" if use_avg else "SUM"
+                alias = ("AvgEnergyShortage" if use_avg else "TotalEnergyShortage") if metric == "EnergyShortage" else ("AvgEnergyDemand" if use_avg else "TotalEnergyConsumption")
+                where_year = f"WHERE strftime('%Y', d.ActualDate) = '{year_val}'" if year_val else ""
+                if monthly:
+                    return (
+                        "SELECT s.StateName, strftime('%Y-%m', d.ActualDate) AS Month, "
+                        f"ROUND({agg}(fs.{metric}), 2) AS {alias} "
+                        "FROM FactStateDailyEnergy fs "
+                        "JOIN DimStates s ON fs.StateID = s.StateID "
+                        "JOIN DimDates d ON fs.DateID = d.DateID "
+                        f"{where_year} "
+                        "GROUP BY s.StateName, Month "
+                        "ORDER BY s.StateName, Month"
+                    )
+                else:
+                    return (
+                        "SELECT s.StateName, "
+                        f"ROUND({agg}(fs.{metric}), 2) AS {alias} "
+                        "FROM FactStateDailyEnergy fs "
+                        "JOIN DimStates s ON fs.StateID = s.StateID "
+                        "JOIN DimDates d ON fs.DateID = d.DateID "
+                        f"{where_year} "
+                        "GROUP BY s.StateName "
+                        "ORDER BY s.StateName"
+                    )
+
+            if wants_all_regions:
+                region_metric = (
+                    "EnergyShortage" if "shortage" in ql else (
+                    "MaxDemandSCADA" if ("maximum demand" in ql or "max demand" in ql or "peak demand" in ql) else "EnergyMet")
+                )
+                repaired = build_all_regions_sql(region_metric, wants_monthly, wants_average)
+            elif wants_all_states:
+                state_metric = (
+                    "EnergyShortage" if "shortage" in ql else (
+                    "MaximumDemand" if ("maximum demand" in ql or "max demand" in ql or "peak demand" in ql) else "EnergyMet")
+                )
+                repaired = build_all_states_sql(state_metric, wants_monthly, wants_average)
+            elif detected_states:
                 state_name = detected_states[0]
                 metric = pick_metric("EnergyMet")
                 repaired = build_state_sql(state_name, metric)
@@ -449,10 +570,10 @@ class EnhancedRAGService:
                     "MaxDemandSCADA" if ("maximum demand" in ql or "max demand" in ql or "peak demand" in ql) else "EnergyMet")
                 )
                 if detected_region:
-                    repaired = build_region_sql(detected_region, region_metric)
+                    repaired = build_region_sql(detected_region, region_metric, monthly=wants_monthly, use_avg=wants_average)
                 else:
                     # No explicit region: default to All-India for any region-level metric
-                    repaired = build_region_sql("India", region_metric)
+                    repaired = build_region_sql("India", region_metric, monthly=wants_monthly, use_avg=wants_average)
 
             # Remove unrelated metrics from SELECT (e.g., MaxDemandSCADA when asking consumption)
             if "consumption" in ql or ("energy" in ql and "shortage" not in ql and not detected_states):
@@ -519,6 +640,23 @@ class EnhancedRAGService:
                 result = await self._process_agentic(query, semantic_context)
             else:
                 result = await self._process_traditional(query, semantic_context)
+
+            # Robust fallbacks: try other strategies if the chosen one fails
+            if not result.get("success", False):
+                # Try semantic-first
+                try_semantic = await self._process_semantic_first(query, semantic_context)
+                if try_semantic.get("success", False):
+                    result = try_semantic
+                else:
+                    # Try hybrid
+                    try_hybrid = await self._process_hybrid(query, semantic_context)
+                    if try_hybrid.get("success", False):
+                        result = try_hybrid
+                    else:
+                        # Finally, traditional
+                        try_traditional = await self._process_traditional(query, semantic_context)
+                        if try_traditional.get("success", False):
+                            result = try_traditional
                 
             # Step 4: Store feedback and execution traces
             if session_id and user_id:

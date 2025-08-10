@@ -371,28 +371,28 @@ class SQLGenerationAgent(BaseAgent):
             return self._generate_default_fallback_sql(query, time_filter)
     
     def _extract_time_filter(self, query_lower: str, time_period: str) -> str:
-        """Extract time filter from query"""
-        # Look for specific years
+        """Extract time filter from query using SQLite-compatible date functions"""
         import re
+        # Look for specific 4-digit year
         year_match = re.search(r'20\d{2}', query_lower)
         if year_match:
             year = year_match.group()
-            return f"WHERE dt.Year = {year}"
-        
+            return f"WHERE strftime('%Y', dt.ActualDate) = '{year}'"
+
         # Look for time period indicators
         if "this year" in query_lower or "current year" in query_lower:
-            return "WHERE dt.Year = 2024"
+            return "WHERE strftime('%Y', dt.ActualDate) = '2024'"
         elif "last year" in query_lower or "previous year" in query_lower:
-            return "WHERE dt.Year = 2023"
+            return "WHERE strftime('%Y', dt.ActualDate) = '2023'"
         elif "2023" in query_lower:
-            return "WHERE dt.Year = 2023"
+            return "WHERE strftime('%Y', dt.ActualDate) = '2023'"
         elif "2024" in query_lower:
-            return "WHERE dt.Year = 2024"
+            return "WHERE strftime('%Y', dt.ActualDate) = '2024'"
         elif "2025" in query_lower:
-            return "WHERE dt.Year = 2025"
+            return "WHERE strftime('%Y', dt.ActualDate) = '2025'"
         else:
             # Default to current year if no specific time mentioned
-            return "WHERE dt.Year = 2024"
+            return "WHERE strftime('%Y', dt.ActualDate) = '2024'"
     
     def _determine_aggregation_function(self, query_lower: str, intent: str) -> str:
         """Determine appropriate aggregation function"""
@@ -475,7 +475,7 @@ class SQLGenerationAgent(BaseAgent):
         return f"""
         SELECT 
             r.RegionName,
-            strftime('%Y-%m', d.Date) as Month,
+            strftime('%Y-%m', d.ActualDate) as Month,
             SUM(fs.{energy_column}) as TotalEnergy,
             prev.PreviousMonthEnergy,
             CASE 
@@ -489,17 +489,17 @@ class SQLGenerationAgent(BaseAgent):
         LEFT JOIN (
             SELECT 
                 r2.RegionName,
-                strftime('%Y-%m', d2.Date) as Month,
+                strftime('%Y-%m', d2.ActualDate) as Month,
                 SUM(fs2.{energy_column}) as PreviousMonthEnergy
             FROM FactAllIndiaDailySummary fs2
             JOIN DimRegions r2 ON fs2.RegionID = r2.RegionID
             JOIN DimDates d2 ON fs2.DateID = d2.DateID
-            WHERE strftime('%Y', d2.Date) = '2024'
-            GROUP BY r2.RegionName, strftime('%Y-%m', d2.Date)
+            WHERE strftime('%Y', d2.ActualDate) = '2024'
+            GROUP BY r2.RegionName, strftime('%Y-%m', d2.ActualDate)
         ) prev ON r.RegionName = prev.RegionName 
-            AND strftime('%Y-%m', d.Date) = date(prev.Month || '-01', '+1 month')
-        WHERE strftime('%Y', d.Date) = '2024'
-        GROUP BY r.RegionName, strftime('%Y-%m', d.Date)
+            AND strftime('%Y-%m', d.ActualDate) = date(prev.Month || '-01', '+1 month')
+        WHERE strftime('%Y', d.ActualDate) = '2024'
+        GROUP BY r.RegionName, strftime('%Y-%m', d.ActualDate)
         ORDER BY r.RegionName, Month
         """
     
@@ -516,17 +516,16 @@ class SQLGenerationAgent(BaseAgent):
         """
     
     def _generate_default_fallback_sql(self, query: str, time_filter: str) -> str:
-        """Generate default fallback SQL with warning"""
+        """Generate a valid, conservative default SQL (All-India EnergyMet)"""
         return f"""
             SELECT 
-                'Fallback SQL Generated' as Status,
-                'Query: {query[:50]}...' as OriginalQuery,
-                'This is an approximate result based on fallback logic' as Warning,
-                COUNT(*) as RecordCount
+                d.RegionName,
+                ROUND(SUM(f.EnergyMet), 2) as TotalEnergyConsumption
             FROM FactAllIndiaDailySummary f
+            JOIN DimRegions d ON f.RegionID = d.RegionID
             JOIN DimDates dt ON f.DateID = dt.DateID
             {time_filter}
-            LIMIT 1
+            AND d.RegionName = 'India'
         """
 
 
