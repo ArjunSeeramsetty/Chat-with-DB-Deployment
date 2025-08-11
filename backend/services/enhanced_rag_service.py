@@ -581,18 +581,32 @@ class EnhancedRAGService:
                 where_parts = [f"s.StateName = '{state_name}'"]
                 if year_val:
                     where_parts.append(f"strftime('%Y', d.ActualDate) = '{year_val}'")
-                if month_val:
-                    where_parts.append(f"strftime('%m', d.ActualDate) = '{month_val}'")
+                if month_val or wants_monthly:
+                    # If user said 'monthly' but didn't specify month name, do not filter by month
+                    # Grouping handled by caller; here we only filter when an explicit month is present
+                    if month_val:
+                        where_parts.append(f"strftime('%m', d.ActualDate) = '{month_val}'")
                 if day_val:
                     where_parts.append(f"date(d.ActualDate) = '{year_val}-{month_val}-{day_val}'")
                 where_clause = " AND ".join(where_parts)
-                return (
-                    f"SELECT {agg}(fs.{metric}) AS {alias} "
-                    f"FROM FactStateDailyEnergy fs "
-                    f"JOIN DimStates s ON fs.StateID = s.StateID "
-                    f"JOIN DimDates d ON fs.DateID = d.DateID "
-                    f"WHERE {where_clause}"
-                )
+                if wants_monthly:
+                    return (
+                        "SELECT strftime('%Y-%m', d.ActualDate) AS Month, "
+                        f"ROUND({agg}(fs.{metric}), 2) AS {alias} "
+                        "FROM FactStateDailyEnergy fs "
+                        "JOIN DimStates s ON fs.StateID = s.StateID "
+                        "JOIN DimDates d ON fs.DateID = d.DateID "
+                        f"WHERE {where_clause} "
+                        "GROUP BY Month ORDER BY Month"
+                    )
+                else:
+                    return (
+                        f"SELECT {agg}(fs.{metric}) AS {alias} "
+                        f"FROM FactStateDailyEnergy fs "
+                        f"JOIN DimStates s ON fs.StateID = s.StateID "
+                        f"JOIN DimDates d ON fs.DateID = d.DateID "
+                        f"WHERE {where_clause}"
+                    )
 
             def build_region_sql(region_name: str, metric: str, *, monthly: bool = False, use_avg: bool = False) -> str:
                 agg = _determine_agg_from_query(ql)

@@ -778,7 +778,7 @@ class VisualizationAgent(BaseAgent):
                     mapped_opts = {
                         "xAxis": x_field or "Month",
                         "yAxis": [y_field] if y_field else [self._infer_first_numeric_key(data)],
-                        "groupBy": series_field or "",
+                        "groupBy": series_field or self._infer_first_category_key(data, exclude=[x_field, y_field]),
                         "data": data,
                         "valueLabel": y_field or self._infer_first_numeric_key(data),
                     }
@@ -796,7 +796,7 @@ class VisualizationAgent(BaseAgent):
                         **raw_opts,
                         "xAxis": raw_opts.get("xField", "Month"),
                         "yAxis": [raw_opts.get("yField")] if raw_opts.get("yField") else [self._infer_first_numeric_key(data)],
-                        "groupBy": raw_opts.get("seriesField", ""),
+                        "groupBy": raw_opts.get("seriesField") or self._infer_first_category_key(data, exclude=[raw_opts.get("xField"), raw_opts.get("yField")]),
                         "valueLabel": raw_opts.get("yField") or self._infer_first_numeric_key(data),
                     }
                 return {"chart_type": spec.get("chartType", "bar"), "config": raw_opts, "confidence": 0.85}
@@ -826,6 +826,26 @@ class VisualizationAgent(BaseAgent):
                 return k
         # default
         return "Value"
+
+    def _infer_first_category_key(self, data: List[dict], exclude: list | None = None) -> str:
+        exclude_set = set([e for e in (exclude or []) if e])
+        if not data:
+            return "Series"
+        first = data[0]
+        for k, v in first.items():
+            if k in exclude_set:
+                continue
+            # prefer common categorical names
+            lk = k.lower()
+            if any(t in lk for t in ["state", "region", "name", "source", "category"]):
+                return k
+        # fallback: first non-numeric field not excluded and not xAxis
+        for k, v in first.items():
+            if k in exclude_set:
+                continue
+            if not isinstance(v, (int, float)):
+                return k
+        return "Series"
 
 
 class WorkflowEngine:

@@ -43,18 +43,18 @@ class WrenAIVisualizationService:
 
         # Example: multi-line temporal for "monthly energy met of all states"
         if analysis.is_time_series and analysis.is_multi_dimensional:
-            if ("state" in (query or "").lower()) and (temporal.granularity in {"monthly", "month", "m"}):
-                spec = self._vega_multi_line_temporal(data, analysis, temporal)
-                return {
-                    "chartType": "vega_lite",
-                    "vegaSpec": spec,
-                    # Fallback for current UI
-                    "options": {
-                        "xField": analysis.time_field or temporal.time_column or "Month",
-                        "yField": (analysis.numeric_fields[0] if analysis.numeric_fields else "Value"),
-                        "seriesField": analysis.category_field or "StateName",
-                    },
-                }
+            # Multi-line temporal for any time + category combo (states, regions, sources, etc.)
+            spec = self._vega_multi_line_temporal(data, analysis, temporal)
+            return {
+                "chartType": "vega_lite",
+                "vegaSpec": spec,
+                # Fallback for current UI
+                "options": {
+                    "xField": analysis.time_field or temporal.time_column or "Month",
+                    "yField": (analysis.numeric_fields[0] if analysis.numeric_fields else "Value"),
+                    "seriesField": analysis.category_field or "Series",
+                },
+            }
 
         # Generic recommendation: if time series single-metric → line; else bar
         if analysis.is_time_series:
