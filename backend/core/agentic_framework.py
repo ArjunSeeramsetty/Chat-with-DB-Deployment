@@ -762,26 +762,32 @@ class VisualizationAgent(BaseAgent):
         """Generate visualization recommendation"""
         if not data:
             return {"chart_type": "none", "confidence": 0.0}
-        
-        # Simple rule-based visualization selection
+
+        # Try WrenAI-style chart intelligence (vega-lite), fallback to heuristics
+        try:
+            from backend.core.visualization_wren import WrenAIVisualizationService
+            viz = WrenAIVisualizationService()
+            spec = viz.generate_visualization(data, query, sql="")
+            if spec:
+                if spec.get("chartType") == "vega_lite":
+                    return {"chart_type": "vega_lite", "config": spec.get("vegaSpec", {}), "confidence": 0.9}
+                # Legacy compatibility
+                return {"chart_type": spec.get("chartType", "bar"), "config": spec.get("options", {}), "confidence": 0.85}
+        except Exception:
+            pass
+
+        # Heuristic fallback
         headers = list(data[0].keys()) if data else []
-        
-        # Determine chart type based on data characteristics
         if any("month" in h.lower() for h in headers):
             chart_type = "line"
         elif any("growth" in h.lower() or "percentage" in h.lower() for h in headers):
             chart_type = "dualAxisLine"
         else:
             chart_type = "bar"
-        
         return {
             "chart_type": chart_type,
             "confidence": 0.8,
-            "config": {
-                "title": f"Data Visualization for: {query[:50]}...",
-                "xAxis": headers[0] if headers else "",
-                "yAxis": headers[1:] if len(headers) > 1 else []
-            }
+            "config": {"title": f"Data Visualization for: {query[:50]}...", "xAxis": headers[0] if headers else "", "yAxis": headers[1:] if len(headers) > 1 else []}
         }
 
 
