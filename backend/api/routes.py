@@ -585,6 +585,7 @@ async def ask_question_enhanced(request: QueryRequest):
             "execution_time": processing_result.get("execution_time", 0.0),
             "session_id": request.session_id or "",
             "processing_mode": processing_result.get("processing_method", "enhanced_semantic"),
+            "selected_candidate_source": processing_result.get("selected_candidate_source"),
             "semantic_insights": processing_result.get("semantic_context", {}),
             "performance_metrics": processing_result.get("performance_metrics", {}),
             "recommendations": processing_result.get("recommendations", []),

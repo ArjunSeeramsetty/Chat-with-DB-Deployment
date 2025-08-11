@@ -21,9 +21,7 @@ class SQLAssembler:
 
     def __init__(self, llm_provider=None):
         self.llm_provider = llm_provider
-        print(
-            "🔧 SQLAssembler initialized with updated code - Monthly detection enabled!"
-        )
+        logger.info("SQLAssembler initialized - Monthly detection enabled")
         self.general_geographic_keywords = [
             "all states",
             "all regions",
@@ -2066,6 +2064,14 @@ class SQLAssembler:
         Dynamically determine the time period for aggregation.
         """
         query_lower = query.lower()
+
+        # Check for specific month names first (e.g., "June", "January")
+        month_names = [
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december"
+        ]
+        if any(month in query_lower for month in month_names):
+            return "monthly"
 
         if any(
             word in query_lower

@@ -72,17 +72,39 @@ class WrenAIIntegration:
     Implements MDL support, advanced vector search, and semantic layer integration
     """
     
-    def __init__(self, llm_provider: LLMProvider, mdl_path: Optional[str] = None):
+    def __init__(self, llm_provider: LLMProvider, mdl_path: Optional[str] = None, db_path: Optional[str] = None):
         self.llm_provider = llm_provider
-        self.sentence_transformer = SentenceTransformer('all-MiniLM-L6-v2')
+        # Try to initialize sentence transformer; fall back to a simple embedder if offline/rate-limited
+        try:
+            self.sentence_transformer = SentenceTransformer('all-MiniLM-L6-v2')
+            self._embed = lambda text: self.sentence_transformer.encode(text).tolist()
+        except Exception as e:
+            logger.warning(f"Falling back to simple hashing embedder due to model load issue: {e}")
+            import hashlib
+            def _hash_embed(text: str) -> List[float]:
+                # Deterministic 384-dim pseudo-embedding via hashing
+                h = hashlib.sha256(text.encode('utf-8', errors='ignore')).digest()
+                # Repeat bytes to reach 384 dims
+                vec = list(h) * ((384 // len(h)) + 1)
+                vec = vec[:384]
+                # Normalize to 0..1
+                return [v / 255.0 for v in vec]
+            self._embed = _hash_embed
         self.vector_client = QdrantClient(":memory:")
         self.mdl_schema: Optional[MDLSchema] = None
         self.mdl_path = mdl_path or "mdl/"
+        self.db_path = db_path
         self._initialize_advanced_vector_store()
         
     async def initialize(self):
         """Initialize Wren AI integration with MDL support"""
         await self._load_mdl_schema()
+        # Augment MDL from SQLite database schema if available
+        try:
+            if self.db_path:
+                await self._augment_mdl_from_sqlite()
+        except Exception as e:
+            logger.warning(f"Failed to augment MDL from SQLite: {e}")
         await self._populate_advanced_vector_store()
         await self._initialize_semantic_layer()
         logger.info("Wren AI integration initialized successfully")
@@ -96,6 +118,7 @@ class WrenAIIntegration:
                 "mdl_relationships": VectorParams(size=384, distance=Distance.COSINE),
                 "mdl_metrics": VectorParams(size=384, distance=Distance.COSINE),
                 "mdl_dimensions": VectorParams(size=384, distance=Distance.COSINE),
+                "mdl_columns": VectorParams(size=384, distance=Distance.COSINE),
                 "semantic_context": VectorParams(size=384, distance=Distance.COSINE),
                 "query_patterns": VectorParams(size=384, distance=Distance.COSINE),
                 "business_entities": VectorParams(size=384, distance=Distance.COSINE)
@@ -117,16 +140,25 @@ class WrenAIIntegration:
             raise
             
     async def _load_mdl_schema(self):
-        """Load MDL schema from files or create default energy domain schema"""
+        """Load MDL schema from YAML/JSON files or create default energy domain schema"""
         try:
-            # Try to load from MDL files
-            mdl_files = list(Path(self.mdl_path).glob("*.yaml")) + list(Path(self.mdl_path).glob("*.yml"))
-            
-            if mdl_files:
-                await self._load_mdl_from_files(mdl_files)
-            else:
+            mdl_dir = Path(self.mdl_path)
+            config_dir = Path("config")
+            # Gather YAML and JSON candidates from mdl/ and config/
+            yaml_files = list(mdl_dir.glob("*.yaml")) + list(mdl_dir.glob("*.yml"))
+            json_files = list(mdl_dir.glob("*.json")) + list(config_dir.glob("*.json"))
+
+            loaded_any = False
+            if yaml_files:
+                await self._load_mdl_from_files(yaml_files)
+                loaded_any = True
+            if json_files:
+                await self._load_mdl_from_json_files(json_files)
+                loaded_any = True
+
+            if not loaded_any:
                 await self._create_default_energy_mdl()
-                
+
         except Exception as e:
             logger.error(f"Failed to load MDL schema: {e}")
             await self._create_default_energy_mdl()
@@ -181,9 +213,133 @@ class WrenAIIntegration:
         )
         
         logger.info(f"Loaded MDL schema with {len(models)} models and {len(relationships)} relationships")
+
+    async def _load_mdl_from_json_files(self, json_files: List[Path]):
+        """Load MDL schema from JSON files (Wren-style or simplified)."""
+        # Merge semantics across multiple JSON files
+        models = {} if not self.mdl_schema else dict(self.mdl_schema.models)
+        relationships = [] if not self.mdl_schema else list(self.mdl_schema.relationships)
+        sources = {} if not self.mdl_schema else dict(self.mdl_schema.sources)
+        metrics = {} if not self.mdl_schema else dict(self.mdl_schema.metrics)
+        dimensions = {} if not self.mdl_schema else dict(self.mdl_schema.dimensions)
+        business_glossary = {} if not self.mdl_schema else dict(self.mdl_schema.business_glossary)
+
+        for jf in json_files:
+            try:
+                with open(jf, 'r', encoding='utf-8') as f:
+                    j = json.load(f)
+            except Exception as e:
+                logger.warning(f"Could not parse JSON MDL file {jf}: {e}")
+                continue
+
+            # Models: accept either dict {models:{name:{...}}} or list {models:[{name:'', columns:[...] ...}]}
+            if isinstance(j.get('models'), dict):
+                for model_name, model_def in j['models'].items():
+                    col_map: Dict[str, Any] = {}
+                    # Handle columns as list or dict
+                    cols = model_def.get('columns', {})
+                    if isinstance(cols, list):
+                        for c in cols:
+                            if isinstance(c, dict) and 'name' in c:
+                                col_map[c['name']] = {k: v for k, v in c.items() if k != 'name'}
+                            elif isinstance(c, str):
+                                col_map[c] = {"type": ""}
+                    elif isinstance(cols, dict):
+                        col_map = cols
+                    models[model_name] = MDLNode(
+                        node_type=MDLNodeType.MODEL,
+                        name=model_name,
+                        definition={
+                            **{k: v for k, v in model_def.items() if k != 'columns'},
+                            "columns": col_map
+                        },
+                        metadata=model_def.get('metadata', {})
+                    )
+            elif isinstance(j.get('models'), list):
+                for m in j['models']:
+                    name = m.get('name') or m.get('model')
+                    if not name:
+                        continue
+                    col_map: Dict[str, Any] = {}
+                    cols = m.get('columns', {})
+                    if isinstance(cols, list):
+                        for c in cols:
+                            if isinstance(c, dict) and 'name' in c:
+                                col_map[c['name']] = {k: v for k, v in c.items() if k != 'name'}
+                            elif isinstance(c, str):
+                                col_map[c] = {"type": ""}
+                    elif isinstance(cols, dict):
+                        col_map = cols
+                    models[name] = MDLNode(
+                        node_type=MDLNodeType.MODEL,
+                        name=name,
+                        definition={
+                            **{k: v for k, v in m.items() if k not in ('columns','name','model')},
+                            "columns": col_map
+                        },
+                        metadata=m.get('metadata', {})
+                    )
+
+            # Relationships: support top-level 'relationships' list
+            rels = j.get('relationships') or []
+            for rel in rels:
+                try:
+                    source = rel.get('source') or rel.get('source_model') or rel.get('from')
+                    target = rel.get('target') or rel.get('target_model') or rel.get('to')
+                    conds = rel.get('conditions') or rel.get('join_conditions') or []
+                    join_type = rel.get('type') or rel.get('join_type') or 'one_to_many'
+                    business_meaning = rel.get('business_meaning', '')
+                    cardinality = rel.get('cardinality', 'many')
+                    if source and target and conds:
+                        relationships.append(MDLRelationship(
+                            source_model=source,
+                            target_model=target,
+                            join_type=join_type,
+                            join_conditions=conds,
+                            business_meaning=business_meaning,
+                            cardinality=cardinality,
+                            is_required=rel.get('required', False)
+                        ))
+                except Exception:
+                    continue
+
+            # Metrics (list or dict)
+            j_metrics = j.get('metrics') or []
+            if isinstance(j_metrics, dict):
+                for mname, mdef in j_metrics.items():
+                    metrics[mname] = MDLNode(node_type=MDLNodeType.METRIC, name=mname, definition=mdef, metadata={})
+            elif isinstance(j_metrics, list):
+                for mobj in j_metrics:
+                    mname = mobj.get('name')
+                    if not mname:
+                        continue
+                    metrics[mname] = MDLNode(node_type=MDLNodeType.METRIC, name=mname, definition={k: v for k, v in mobj.items() if k != 'name'}, metadata={})
+
+            # Dimensions (optional)
+            j_dims = j.get('dimensions') or {}
+            if isinstance(j_dims, dict):
+                for dname, ddef in j_dims.items():
+                    dimensions[dname] = MDLNode(node_type=MDLNodeType.DIMENSION, name=dname, definition=ddef, metadata={})
+
+            # Business glossary (optional)
+            j_gloss = j.get('business_glossary') or {}
+            if isinstance(j_gloss, dict):
+                business_glossary.update(j_gloss)
+
+        self.mdl_schema = MDLSchema(
+            models=models,
+            relationships=relationships,
+            sources=sources,
+            metrics=metrics,
+            dimensions=dimensions,
+            business_glossary=business_glossary,
+            metadata={}
+        )
+        logger.info(f"Loaded JSON MDL with {len(models)} models, {len(relationships)} relationships, {len(metrics)} metrics")
         
     async def _create_default_energy_mdl(self):
-        """Create default energy domain MDL schema"""
+        """Create default energy domain MDL schema aligned to actual DB columns"""
+        # Core models (facts)
         models = {
             "FactAllIndiaDailySummary": MDLNode(
                 node_type=MDLNodeType.MODEL,
@@ -192,15 +348,17 @@ class WrenAIIntegration:
                     "columns": {
                         "RegionID": {"type": "integer", "description": "Region identifier"},
                         "DateID": {"type": "integer", "description": "Date identifier"},
-                        "EnergyMet": {"type": "decimal", "description": "Energy met in MWh"},
-                        "EnergyRequirement": {"type": "decimal", "description": "Energy requirement in MWh"},
-                        "Surplus": {"type": "decimal", "description": "Energy surplus in MWh"},
-                        "Deficit": {"type": "decimal", "description": "Energy deficit in MWh"}
+                        "EnergyMet": {"type": "decimal", "description": "Energy met (consumption) in MU"},
+                        "EnergyShortage": {"type": "decimal", "description": "Energy shortage in MU"},
+                        "MaxDemandSCADA": {"type": "decimal", "description": "Region-level peak demand (MW)"},
+                        "CentralSectorOutage": {"type": "decimal", "description": "Central sector outage (MU)"},
+                        "StateSectorOutage": {"type": "decimal", "description": "State sector outage (MU)"},
+                        "PrivateSectorOutage": {"type": "decimal", "description": "Private sector outage (MU)"}
                     },
-                    "description": "Daily energy summary at national level",
+                    "description": "Daily energy summary by region (includes India aggregate)",
                     "grain": "daily_region"
                 },
-                metadata={"business_name": "National Energy Summary"}
+                metadata={"business_name": "National/Region Energy Summary"}
             ),
             "FactStateDailyEnergy": MDLNode(
                 node_type=MDLNodeType.MODEL,
@@ -209,58 +367,280 @@ class WrenAIIntegration:
                     "columns": {
                         "StateID": {"type": "integer", "description": "State identifier"},
                         "DateID": {"type": "integer", "description": "Date identifier"},
-                        "EnergyMet": {"type": "decimal", "description": "Energy met in MWh"},
-                        "EnergyConsumption": {"type": "decimal", "description": "Energy consumption in MWh"},
-                        "PeakDemand": {"type": "decimal", "description": "Peak demand in MW"}
+                        "EnergyMet": {"type": "decimal", "description": "Energy met (consumption) in MU"},
+                        "EnergyShortage": {"type": "decimal", "description": "Energy shortage in MU"},
+                        "MaximumDemand": {"type": "decimal", "description": "State-level peak demand (MW)"}
                     },
-                    "description": "Daily energy data by state",
+                    "description": "Daily energy metrics by state",
                     "grain": "daily_state"
                 },
-                metadata={"business_name": "State Energy Data"}
-            )
+                metadata={"business_name": "State Energy Metrics"}
+            ),
+            # Dimensions
+            "DimRegions": MDLNode(
+                node_type=MDLNodeType.MODEL,
+                name="DimRegions",
+                definition={
+                    "columns": {
+                        "RegionID": {"type": "integer", "description": "Region identifier"},
+                        "RegionName": {"type": "string", "description": "Region name (India, Northern Region, etc.)"}
+                    },
+                    "description": "Regions dimension"
+                },
+                metadata={"business_name": "Regions"}
+            ),
+            "DimStates": MDLNode(
+                node_type=MDLNodeType.MODEL,
+                name="DimStates",
+                definition={
+                    "columns": {
+                        "StateID": {"type": "integer", "description": "State identifier"},
+                        "StateName": {"type": "string", "description": "State name"}
+                    },
+                    "description": "States dimension"
+                },
+                metadata={"business_name": "States"}
+            ),
+            "DimDates": MDLNode(
+                node_type=MDLNodeType.MODEL,
+                name="DimDates",
+                definition={
+                    "columns": {
+                        "DateID": {"type": "integer", "description": "Date identifier"},
+                        "ActualDate": {"type": "date", "description": "Actual calendar date"}
+                    },
+                    "description": "Dates dimension"
+                },
+                metadata={"business_name": "Dates"}
+            ),
         }
-        
+
+        # Relationships (business semantics + join keys)
         relationships = [
             MDLRelationship(
                 source_model="FactAllIndiaDailySummary",
                 target_model="DimRegions",
                 join_type="many_to_one",
-                join_conditions=["f.RegionID = d.RegionID"],
-                business_meaning="Each daily summary belongs to a specific region",
+                join_conditions=["fs.RegionID = r.RegionID"],
+                business_meaning="Each daily region record belongs to one region",
                 cardinality="many",
-                is_required=True
+                is_required=True,
+            ),
+            MDLRelationship(
+                source_model="FactAllIndiaDailySummary",
+                target_model="DimDates",
+                join_type="many_to_one",
+                join_conditions=["fs.DateID = d.DateID"],
+                business_meaning="Each daily region record belongs to one date",
+                cardinality="many",
+                is_required=True,
             ),
             MDLRelationship(
                 source_model="FactStateDailyEnergy",
                 target_model="DimStates",
                 join_type="many_to_one",
-                join_conditions=["f.StateID = d.StateID"],
-                business_meaning="Each state energy record belongs to a specific state",
+                join_conditions=["fs.StateID = s.StateID"],
+                business_meaning="Each daily state record belongs to one state",
                 cardinality="many",
-                is_required=True
-            )
+                is_required=True,
+            ),
+            MDLRelationship(
+                source_model="FactStateDailyEnergy",
+                target_model="DimDates",
+                join_type="many_to_one",
+                join_conditions=["fs.DateID = d.DateID"],
+                business_meaning="Each daily state record belongs to one date",
+                cardinality="many",
+                is_required=True,
+            ),
         ]
-        
+
+        # Business glossary
         business_glossary = {
             "energy_met": "Total energy supplied to meet demand",
-            "energy_requirement": "Total energy demand/requirement",
-            "surplus": "Excess energy available beyond requirement",
-            "deficit": "Shortfall in energy supply compared to requirement",
-            "peak_demand": "Maximum energy demand in a day",
-            "generation": "Energy production from various sources"
+            "energy_shortage": "Unmet energy demand",
+            "peak_demand_state": "Maximum demand measured for a state (MaximumDemand)",
+            "peak_demand_region": "Maximum demand measured for a region (MaxDemandSCADA)",
+            "consumption": "EnergyMet (MU)",
         }
-        
+
+        # Metrics and dimensions (semantic layer)
+        metrics = {
+            "energy_consumption_region": {
+                "model": "FactAllIndiaDailySummary",
+                "expression": "SUM(fs.EnergyMet)",
+                "description": "Total energy consumption (MU) by region",
+            },
+            "energy_shortage_region": {
+                "model": "FactAllIndiaDailySummary",
+                "expression": "SUM(fs.EnergyShortage)",
+                "description": "Total energy shortage (MU) by region",
+            },
+            "peak_demand_region": {
+                "model": "FactAllIndiaDailySummary",
+                "expression": "MAX(fs.MaxDemandSCADA)",
+                "description": "Peak demand (MW) for a region",
+            },
+            "outage_total_region": {
+                "model": "FactAllIndiaDailySummary",
+                "expression": "SUM(COALESCE(fs.CentralSectorOutage,0)+COALESCE(fs.StateSectorOutage,0)+COALESCE(fs.PrivateSectorOutage,0))",
+                "description": "Total outage (MU) for a region",
+            },
+            "outage_central_region": {
+                "model": "FactAllIndiaDailySummary",
+                "expression": "SUM(COALESCE(fs.CentralSectorOutage,0))",
+                "description": "Central sector outage (MU) for a region",
+            },
+            "outage_state_region": {
+                "model": "FactAllIndiaDailySummary",
+                "expression": "SUM(COALESCE(fs.StateSectorOutage,0))",
+                "description": "State sector outage (MU) for a region",
+            },
+            "outage_private_region": {
+                "model": "FactAllIndiaDailySummary",
+                "expression": "SUM(COALESCE(fs.PrivateSectorOutage,0))",
+                "description": "Private sector outage (MU) for a region",
+            },
+            "energy_consumption_state": {
+                "model": "FactStateDailyEnergy",
+                "expression": "SUM(fs.EnergyMet)",
+                "description": "Total energy consumption (MU) by state",
+            },
+            "energy_shortage_state": {
+                "model": "FactStateDailyEnergy",
+                "expression": "SUM(fs.EnergyShortage)",
+                "description": "Total energy shortage (MU) by state",
+            },
+            "peak_demand_state": {
+                "model": "FactStateDailyEnergy",
+                "expression": "MAX(fs.MaximumDemand)",
+                "description": "Peak demand (MW) for a state",
+            },
+        }
+
+        dimensions = {
+            "region_name": {"model": "DimRegions", "column": "r.RegionName"},
+            "state_name": {"model": "DimStates", "column": "s.StateName"},
+            "month": {"model": "DimDates", "expression": "strftime('%Y-%m', d.ActualDate)"},
+            "year": {"model": "DimDates", "expression": "strftime('%Y', d.ActualDate)"},
+        }
+
         self.mdl_schema = MDLSchema(
             models=models,
             relationships=relationships,
             sources={},
-            metrics={},
-            dimensions={},
+            metrics={k: MDLNode(node_type=MDLNodeType.METRIC, name=k, definition=v, metadata={}) for k, v in metrics.items()},
+            dimensions={k: MDLNode(node_type=MDLNodeType.DIMENSION, name=k, definition=v, metadata={}) for k, v in dimensions.items()},
             business_glossary=business_glossary,
-            metadata={"domain": "energy", "version": "1.0"}
+            metadata={"domain": "energy", "version": "1.1"}
         )
-        
-        logger.info("Created default energy domain MDL schema")
+
+        logger.info("Created default energy domain MDL schema (models, relationships, metrics, dimensions)")
+
+    async def _augment_mdl_from_sqlite(self):
+        """Read SQLite schema and add any missing tables/columns/relationships into MDL."""
+        import sqlite3
+        if not self.db_path:
+            return
+        if not self.mdl_schema:
+            # Initialize empty schema if not present
+            self.mdl_schema = MDLSchema(models={}, relationships=[], sources={}, metrics={}, dimensions={}, business_glossary={}, metadata={})
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            # Get table names
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+            tables = [r[0] for r in cur.fetchall()]
+
+            # Load columns per table
+            table_to_cols: Dict[str, Dict[str, Any]] = {}
+            for t in tables:
+                cur.execute(f"PRAGMA table_info('{t}')")
+                cols = [dict(name=row[1], type=row[2]) for row in cur.fetchall()]
+                table_to_cols[t] = {c["name"]: {"type": c["type"]} for c in cols}
+
+                # Compute heuristic hints
+                def _pick_preferred_time(col_names: List[str]) -> Optional[str]:
+                    prefs = ["ActualDate", "Timestamp", "TimeStamp", "DateTime", "Time", "BlockTime", "TimeBlock"]
+                    for p in prefs:
+                        if p in col_names:
+                            return p
+                    # try lowercase contains
+                    lowers = {c.lower(): c for c in col_names}
+                    for p in ["actualdate", "timestamp", "datetime", "time", "blocktime", "timeblock"]:
+                        if p in lowers:
+                            return lowers[p]
+                    return None
+
+                def _pick_preferred_values(col_names: List[str]) -> List[str]:
+                    result: List[str] = []
+                    for c in col_names:
+                        cl = c.lower()
+                        if cl.endswith("id"):
+                            continue
+                        if any(k in cl for k in ["energymet", "energyshortage", "maxdemandscada", "maximumdemand"]):
+                            result.append(c)
+                        if any(k in cl for k in ["flow", "mw", "power"]):
+                            result.append(c)
+                        if any(k in cl for k in ["generationamount", "totalgeneration", "generation_mw", "generationmu", "generation"]):
+                            result.append(c)
+                    # de-dup preserving order
+                    out = []
+                    for x in result:
+                        if x not in out:
+                            out.append(x)
+                    return out
+
+                col_names_list = list(table_to_cols[t].keys())
+                hints = {
+                    "preferred_time_column": _pick_preferred_time(col_names_list),
+                    "preferred_value_columns": _pick_preferred_values(col_names_list),
+                    "has_date_fk": ("DateID" in col_names_list),
+                }
+
+                if t not in self.mdl_schema.models:
+                    self.mdl_schema.models[t] = MDLNode(
+                        node_type=MDLNodeType.MODEL,
+                        name=t,
+                        definition={"columns": table_to_cols[t], "description": f"Auto-imported from SQLite: {t}", "hints": hints},
+                        metadata={}
+                    )
+                else:
+                    # Merge missing columns
+                    existing_cols = self.mdl_schema.models[t].definition.setdefault("columns", {})
+                    existing_cols.update({k: v for k, v in table_to_cols[t].items() if k not in existing_cols})
+                    # Merge hints
+                    existing_hints = self.mdl_schema.models[t].definition.setdefault("hints", {})
+                    for hk, hv in hints.items():
+                        if hk not in existing_hints or not existing_hints[hk]:
+                            existing_hints[hk] = hv
+
+            # Load FK relationships
+            for t in tables:
+                cur.execute(f"PRAGMA foreign_key_list('{t}')")
+                for row in cur.fetchall():
+                    ref_table = row[2]
+                    from_col = row[3]
+                    to_col = row[4]
+                    # Build relationship node
+                    join = f"{t}.{from_col} = {ref_table}.{to_col}"
+                    rel = MDLRelationship(
+                        source_model=t,
+                        target_model=ref_table,
+                        join_type="many_to_one",
+                        join_conditions=[join],
+                        business_meaning=f"FK: {t}.{from_col} -> {ref_table}.{to_col}",
+                        cardinality="many",
+                        is_required=False,
+                    )
+                    # Avoid duplicates
+                    existing = [r for r in self.mdl_schema.relationships if r.source_model == rel.source_model and r.target_model == rel.target_model and r.join_conditions == rel.join_conditions]
+                    if not existing:
+                        self.mdl_schema.relationships.append(rel)
+        finally:
+            conn.close()
         
     async def _populate_advanced_vector_store(self):
         """Populate advanced vector store with MDL knowledge"""
@@ -271,7 +651,7 @@ class WrenAIIntegration:
         model_points = []
         for model_name, model_node in self.mdl_schema.models.items():
             model_text = f"{model_name}: {model_node.definition.get('description', '')}"
-            embedding = self.sentence_transformer.encode(model_text).tolist()
+            embedding = self._embed(model_text)
             
             model_points.append(PointStruct(
                 id=len(model_points),
@@ -290,7 +670,7 @@ class WrenAIIntegration:
         relationship_points = []
         for rel in self.mdl_schema.relationships:
             rel_text = f"{rel.source_model} to {rel.target_model}: {rel.business_meaning}"
-            embedding = self.sentence_transformer.encode(rel_text).tolist()
+            embedding = self._embed(rel_text)
             
             relationship_points.append(PointStruct(
                 id=len(relationship_points),
@@ -305,10 +685,43 @@ class WrenAIIntegration:
                 }
             ))
             
+        # Index metrics
+        metric_points = []
+        for metric_name, metric_node in self.mdl_schema.metrics.items():
+            metric_text = f"{metric_name}: {metric_node.definition.get('description', '')} in {metric_node.definition.get('model', '')}"
+            embedding = self._embed(metric_text)
+
+            metric_points.append(PointStruct(
+                id=len(metric_points),
+                vector=embedding,
+                payload={
+                    "type": "mdl_metric",
+                    "name": metric_name,
+                    "model": metric_node.definition.get('model', ''),
+                    "expression": metric_node.definition.get('expression', ''),
+                    "description": metric_node.definition.get('description', ''),
+                }
+            ))
+
+        # Index dimensions
+        dimension_points = []
+        for dim_name, dim_node in self.mdl_schema.dimensions.items():
+            dim_text = f"{dim_name}: {dim_node.definition}"
+            embedding = self._embed(dim_text)
+            dimension_points.append(PointStruct(
+                id=len(dimension_points),
+                vector=embedding,
+                payload={
+                    "type": "mdl_dimension",
+                    "name": dim_name,
+                    "definition": dim_node.definition,
+                }
+            ))
+
         # Index business glossary
         glossary_points = []
         for term, definition in self.mdl_schema.business_glossary.items():
-            embedding = self.sentence_transformer.encode(f"{term}: {definition}").tolist()
+            embedding = self._embed(f"{term}: {definition}")
             glossary_points.append(PointStruct(
                 id=len(glossary_points),
                 vector=embedding,
@@ -319,11 +732,35 @@ class WrenAIIntegration:
                 }
             ))
             
+        # Index columns
+        column_points = []
+        for model_name, model_node in self.mdl_schema.models.items():
+            cols = (model_node.definition or {}).get('columns', {})
+            for col_name, col_def in cols.items():
+                ctext = f"{model_name}.{col_name}: {col_def}"
+                embedding = self._embed(ctext)
+                column_points.append(PointStruct(
+                    id=len(column_points),
+                    vector=embedding,
+                    payload={
+                        "type": "mdl_column",
+                        "table": model_name,
+                        "column": col_name,
+                        "definition": col_def,
+                    }
+                ))
+
         # Insert into vector store
         if model_points:
             self.vector_client.upsert(collection_name="mdl_models", points=model_points)
         if relationship_points:
             self.vector_client.upsert(collection_name="mdl_relationships", points=relationship_points)
+        if metric_points:
+            self.vector_client.upsert(collection_name="mdl_metrics", points=metric_points)
+        if dimension_points:
+            self.vector_client.upsert(collection_name="mdl_dimensions", points=dimension_points)
+        if column_points:
+            self.vector_client.upsert(collection_name="mdl_columns", points=column_points)
         if glossary_points:
             self.vector_client.upsert(collection_name="business_entities", points=glossary_points)
             
@@ -341,11 +778,11 @@ class WrenAIIntegration:
         """
         try:
             # Step 1: MDL-aware vector search
-            query_embedding = self.sentence_transformer.encode(natural_language_query).tolist()
+            query_embedding = self._embed(natural_language_query)
             
             # Search across all collections
             search_results = {}
-            collections = ["mdl_models", "mdl_relationships", "business_entities", "query_patterns"]
+            collections = ["mdl_models", "mdl_relationships", "mdl_columns", "mdl_metrics", "mdl_dimensions", "business_entities", "query_patterns"]
             
             for collection in collections:
                 try:
@@ -467,16 +904,31 @@ class WrenAIIntegration:
         
     def _build_semantic_mappings(self, query: str, business_entities: List) -> Dict[str, str]:
         """Build semantic mappings from natural language to schema elements"""
-        mappings = {}
+        mappings: Dict[str, str] = {}
         query_lower = query.lower()
-        
+
         # Map business terms to schema elements
         for entity in business_entities:
-            if entity["type"] == "business_term":
-                term = entity["term"]
-                if term in query_lower:
-                    mappings[term] = entity["definition"]
-                    
+            if entity.get("type") == "business_term":
+                term = entity.get("term", "")
+                if term and term in query_lower:
+                    mappings[term] = entity.get("definition", "")
+
+        # Detect explicit table mentions to guide dynamic model selection
+        try:
+            import re
+            # split on non-word boundaries and dots for table.column hints
+            tokens = set(re.split(r"[^A-Za-z0-9_.]+", query_lower))
+            mentioned = []
+            if self.mdl_schema:
+                for table in self.mdl_schema.models.keys():
+                    if table.lower() in tokens or table.lower().replace('_', '') in tokens:
+                        mentioned.append(table)
+            if mentioned:
+                mappings["explicit_tables"] = ",".join(sorted(set(mentioned)))
+        except Exception:
+            pass
+
         return mappings
         
     async def generate_mdl_aware_sql(self, query: str, semantic_context: Dict) -> Dict[str, Any]:
@@ -485,9 +937,13 @@ class WrenAIIntegration:
             # Use MDL context to enhance SQL generation
             mdl_context = semantic_context.get("mdl_context", {})
             business_entities = semantic_context.get("business_entities", [])
+            semantic_mappings = semantic_context.get("semantic_mappings", {})
             
             # Build enhanced prompt with MDL context
             prompt = self._build_mdl_aware_prompt(query, mdl_context, business_entities)
+            # Hint explicit tables (if any) for dynamic selection
+            if semantic_mappings.get("explicit_tables"):
+                prompt += f"\n\nPrefer using these explicitly mentioned tables if it makes sense: {semantic_mappings['explicit_tables']}\n"
             
             # Generate SQL using LLM
             response = await self.llm_provider.generate(prompt)
@@ -495,6 +951,11 @@ class WrenAIIntegration:
             # Extract SQL from response
             response_text = response.content if hasattr(response, 'content') else str(response)
             extracted_sql = self._extract_sql_from_response(response_text)
+
+            # Post-process using MDL hints to correct common model/time issues, include original query for temporal refinement
+            mdl_ctx_with_query = dict(mdl_context or {})
+            mdl_ctx_with_query['original_query'] = query
+            extracted_sql = self._postprocess_sql_with_mdl_hints(extracted_sql, mdl_ctx_with_query)
             
             return {
                 "sql": extracted_sql,
@@ -608,9 +1069,128 @@ class WrenAIIntegration:
         
         # If all else fails, return empty string
         return ""
+
+    def _postprocess_sql_with_mdl_hints(self, sql: str, mdl_context: Dict) -> str:
+        """Use MDL model hints to fix common column/time issues in the generated SQL.
+        Alias-aware and model-aware adjustments.
+        """
+        try:
+            if not sql or not mdl_context:
+                return sql
+            import re as _re
+            # Detect fact table and alias actually used
+            m = _re.search(r"FROM\s+(\w+)\s+([a-zA-Z]\\w*)", sql, _re.IGNORECASE)
+            fact_table = m.group(1) if m else None
+            fact_alias = m.group(2) if m else "fs"
+
+            # Pull hints for detected table; fallback to top relevant model
+            hints = {}
+            if fact_table and self.mdl_schema and self.mdl_schema.models:
+                node = self.mdl_schema.models.get(fact_table)
+                hints = (node.definition or {}).get('hints', {}) if node else {}
+            if not hints:
+                relevant_models = [m.get('name') for m in mdl_context.get('relevant_models', []) if isinstance(m, dict)]
+                if relevant_models:
+                    node = self.mdl_schema.models.get(relevant_models[0]) if self.mdl_schema and self.mdl_schema.models else None
+                    hints = (node.definition or {}).get('hints', {}) if node else {}
+
+            preferred_values = hints.get('preferred_value_columns') or []
+            preferred_time = hints.get('preferred_time_column')
+            has_date_fk = hints.get('has_date_fk', False)
+
+            fixed = sql
+            # 1) Replace EnergyMet in non-energy models with preferred value column
+            model_lower = (fact_table or '').lower()
+            is_energy_model = ('allindiadailysummary' in model_lower) or ('statedailyenergy' in model_lower)
+            if ('energymet' in fixed.lower()) and not is_energy_model and preferred_values:
+                pv = preferred_values[0]
+                fixed = _re.sub(rf"\b{_re.escape(fact_alias)}\.EnergyMet\b", fact_alias + '.' + pv, fixed)
+                fixed = _re.sub(r"\bEnergyMet\b", pv, fixed)
+
+            # 2) If SQL uses d.ActualDate without DateID in model, switch to preferred time column and drop DimDates join
+            if preferred_time and not has_date_fk and 'd.ActualDate' in fixed:
+                fixed = _re.sub(r"JOIN\s+DimDates\s+d\s+ON\s+[^\s]+", "", fixed, flags=_re.IGNORECASE)
+                fixed = fixed.replace('d.ActualDate', f'{fact_alias}.{preferred_time}')
+                fixed = _re.sub(r"strftime\('%Y-%m',\s*d\.ActualDate\)", f"strftime('%Y-%m', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"strftime\('%Y',\s*d\.ActualDate\)", f"strftime('%Y', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
+
+            # 3) Clean f.Table.Column → alias.Column noise
+            fixed = _re.sub(r"\bf\.[A-Za-z_]\w+\.", fact_alias + '.', fixed)
+
+            # 4) Temporal refinement: inject month/day filters if mentioned in query text available via mdl_context
+            try:
+                # Pull original query if present in context (some callers add it), else skip
+                original_query = mdl_context.get('original_query') or mdl_context.get('query')
+                if isinstance(original_query, str) and original_query:
+                    ql = original_query.lower()
+                    # Map month names
+                    month_map = {
+                        'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                        'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'
+                    }
+                    month_num = None
+                    for name, num in month_map.items():
+                        if _re.search(rf"\b{name}\b", ql):
+                            month_num = num
+                            break
+                    # Detect year
+                    year_m = _re.search(r"\b(19|20)\d{2}\b", ql)
+                    # Determine the time expression used in SQL
+                    time_expr = None
+                    if 'd.ActualDate' in fixed and has_date_fk:
+                        time_expr = 'd.ActualDate'
+                    elif preferred_time:
+                        time_expr = f"{fact_alias}.{preferred_time}"
+                    # Inject month filter if month specified and time_expr exists
+                    if time_expr and month_num:
+                        # Only inject if a month filter is not already present
+                        if _re.search(r"strftime\('%m',\s*" + _re.escape(time_expr) + r"\)\s*=\s*'\d{2}'", fixed) is None:
+                            # Add to WHERE clause; if WHERE exists, append AND, else create WHERE
+                            if _re.search(r"\bWHERE\b", fixed, _re.IGNORECASE):
+                                fixed = _re.sub(r"\bWHERE\b", lambda m: m.group(0) + f" strftime('%m', {time_expr}) = '{month_num}' AND", fixed, count=1, flags=_re.IGNORECASE)
+                            else:
+                                fixed += f" WHERE strftime('%m', {time_expr}) = '{month_num}'"
+                    # Inject day filter for patterns like '15th June 2025'
+                    day_m = _re.search(r"\b(\d{1,2})(st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+((19|20)\d{2})\b", ql)
+                    if time_expr and day_m:
+                        day = day_m.group(1).zfill(2)
+                        mon = month_map.get(day_m.group(3), None)
+                        yr = day_m.group(4)
+                        if mon and yr:
+                            date_iso = f"{yr}-{mon}-{day}"
+                            if _re.search(r"date\(\s*" + _re.escape(time_expr) + r"\s*\)\s*=\s*'\d{4}-\d{2}-\d{2}'", fixed) is None:
+                                if _re.search(r"\bWHERE\b", fixed, _re.IGNORECASE):
+                                    fixed = _re.sub(r"\bWHERE\b", lambda m: m.group(0) + f" date({time_expr}) = '{date_iso}' AND", fixed, count=1, flags=_re.IGNORECASE)
+                                else:
+                                    fixed += f" WHERE date({time_expr}) = '{date_iso}'"
+            except Exception:
+                pass
+
+            return fixed
+        except Exception:
+            return sql
         
     def _build_mdl_aware_prompt(self, query: str, mdl_context: Dict, business_entities: List) -> str:
         """Build MDL-aware prompt for SQL generation"""
+        # Build model-specific hints section
+        model_hints_lines = []
+        try:
+            relevant_models = [m['name'] for m in mdl_context.get('relevant_models', [])]
+        except Exception:
+            relevant_models = []
+        for mname in relevant_models:
+            try:
+                node = self.mdl_schema.models.get(mname)
+                hints = (node.definition or {}).get('hints', {}) if node else {}
+                pvals = hints.get('preferred_value_columns') or []
+                ptime = hints.get('preferred_time_column')
+                has_date_fk = hints.get('has_date_fk', False)
+                if pvals or ptime or has_date_fk:
+                    model_hints_lines.append(f"- {mname}: value={pvals[:3]} time={ptime or 'n/a'} date_fk={bool(has_date_fk)}")
+            except Exception:
+                continue
+        model_hints_block = "\n".join(model_hints_lines)
+
         prompt = f"""
         Generate a complete SQLite-compatible SQL query for the following query using MDL context:
         
@@ -620,6 +1200,9 @@ class WrenAIIntegration:
         - Relevant Models: {[m['name'] for m in mdl_context.get('relevant_models', [])]}
         - Relationships: {[f"{r['source']} -> {r['target']}" for r in mdl_context.get('relevant_relationships', [])]}
         - Join Paths: {mdl_context.get('join_paths', [])}
+
+        MODEL HINTS:
+        {model_hints_block}
         
         Business Entities:
         {chr(10).join([f"- {e['term']}: {e['definition']}" for e in business_entities])}
@@ -688,6 +1271,9 @@ class WrenAIIntegration:
         - Use fs.EnergyMet for energy consumption
         - Use fs.MaxDemandSCADA for region-level peak demand (NOT MaximumDemand)
         - Use fs.EnergyShortage for energy shortage
+        - For outage: use these columns as applicable and SUM them as needed:
+          - fs.CentralSectorOutage, fs.StateSectorOutage, fs.PrivateSectorOutage
+          - For "total outage" use SUM(COALESCE(fs.CentralSectorOutage,0)+COALESCE(fs.StateSectorOutage,0)+COALESCE(fs.PrivateSectorOutage,0))
         
         FOR STATE-LEVEL QUERIES (multiple states):
         - FactStateDailyEnergy (alias: fs) - contains EnergyMet, MaximumDemand, EnergyShortage columns
@@ -698,13 +1284,43 @@ class WrenAIIntegration:
         
         COMMON:
         - DimDates (alias: d) - contains ActualDate column (NOT Date, NOT Year)
-        - Use d.ActualDate for dates (NOT d.Date, NOT d.Year)
+        - If the chosen FACT table has a DateID column, JOIN DimDates and use d.ActualDate for dates.
+        - If the chosen FACT table does NOT have DateID, use the model's preferred time column from MODEL HINTS (e.g., Timestamp, TimeBlock). Do NOT reference d.ActualDate without a join.
         - For year filtering: WHERE strftime('%Y', d.ActualDate) = '2025'
         - For month filtering: WHERE strftime('%Y-%m', d.ActualDate) = '2025-01'
             - For monthly average requests: include month in SELECT using strftime('%Y-%m', d.ActualDate) AS Month, then GROUP BY Month and use AVG(...) for metrics
         - Use fs.RegionID for joining with DimRegions
         - Use fs.StateID for joining with DimStates  
         - Use fs.DateID for joining with DimDates
+
+        NEVER RULES:
+        - NEVER use EnergyMet outside FactAllIndiaDailySummary or FactStateDailyEnergy
+        - NEVER reference d.ActualDate unless JOIN DimDates is present and the FACT has DateID
+        - NEVER invent columns not listed in MODEL HINTS or schema columns
+
+        MODEL-SPECIFIC EXAMPLES:
+        - FactInternationalTransmissionLinkFlow (alias: fs)
+          If there is no DateID, use the model's intrinsic time column (e.g., fs.Timestamp) for strftime().
+          SELECT ROUND(SUM(fs.Flow), 2) AS TotalFlow
+          FROM FactInternationalTransmissionLinkFlow fs
+          WHERE strftime('%Y', fs.Timestamp) = '2024'
+
+        - FactTransmissionLinkFlow (alias: fs)
+          SELECT ROUND(SUM(fs.Flow), 2) AS TotalFlow
+          FROM FactTransmissionLinkFlow fs
+          WHERE strftime('%Y', fs.Timestamp) = '2024'
+
+        - FactTimeBlockPowerData (alias: fs)
+          SELECT strftime('%Y-%m', fs.TimeBlock) AS Month, ROUND(SUM(fs.Power), 2) AS TotalPower
+          FROM FactTimeBlockPowerData fs
+          WHERE strftime('%Y', fs.TimeBlock) = '2025'
+          GROUP BY Month ORDER BY Month
+
+        - FactTimeBlockGeneration (alias: fs)
+          SELECT strftime('%Y-%m', fs.TimeBlock) AS Month, ROUND(SUM(fs.Generation), 2) AS TotalGeneration
+          FROM FactTimeBlockGeneration fs
+          WHERE strftime('%Y', fs.TimeBlock) = '2025'
+          GROUP BY Month ORDER BY Month
         
         IMPORTANT: Do NOT mix state and region tables! Choose ONE based on the query:
         - For "states in region" queries → Use FactStateDailyEnergy + DimStates + JOIN with DimRegions  
