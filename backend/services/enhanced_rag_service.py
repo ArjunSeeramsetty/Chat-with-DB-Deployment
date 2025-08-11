@@ -757,24 +757,33 @@ class EnhancedRAGService:
                 alias = "Value"
                 where_year = f"WHERE strftime('%Y', d.ActualDate) = '{year_val}'" if year_val else ""
                 if monthly:
+                    # If query mentions a specific region, restrict states to that region
+                    region_filter_sql = ""
+                    if detected_region:
+                        region_filter_sql = f" AND r.RegionName = '{detected_region}' "
                     return (
                         "SELECT s.StateName, strftime('%Y-%m', d.ActualDate) AS Month, "
                         f"ROUND({agg}(fs.{metric}), 2) AS {alias} "
                         "FROM FactStateDailyEnergy fs "
                         "JOIN DimStates s ON fs.StateID = s.StateID "
                         "JOIN DimDates d ON fs.DateID = d.DateID "
-                        f"{where_year} "
+                        "JOIN DimRegions r ON s.RegionID = r.RegionID "
+                        f"{where_year}{region_filter_sql} "
                         "GROUP BY s.StateName, Month "
                         "ORDER BY s.StateName, Month"
                     )
                 else:
+                    region_filter_sql = ""
+                    if detected_region:
+                        region_filter_sql = f" AND r.RegionName = '{detected_region}' "
                     return (
                         "SELECT s.StateName, "
                         f"ROUND({agg}(fs.{metric}), 2) AS {alias} "
                         "FROM FactStateDailyEnergy fs "
                         "JOIN DimStates s ON fs.StateID = s.StateID "
                         "JOIN DimDates d ON fs.DateID = d.DateID "
-                        f"{where_year} "
+                        "JOIN DimRegions r ON s.RegionID = r.RegionID "
+                        f"{where_year}{region_filter_sql} "
                         "GROUP BY s.StateName "
                         "ORDER BY s.StateName"
                     )

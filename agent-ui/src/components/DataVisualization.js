@@ -300,6 +300,27 @@ const DataVisualization = ({
       : table.headers.slice(1);
     const groupBy = chartConfig?.groupBy;
 
+    // If groupBy is provided (e.g., StateName) and there is only one measure in yAxis
+    // pivot the data to a wide format so each group becomes its own series/column
+    if (groupBy && yAxisKeys.length === 1 && rawData && rawData.length > 0) {
+      const valueKey = yAxisKeys[0];
+      const xBuckets = new Map(); // x -> { x, group1: val, group2: val }
+      const groups = new Set();
+      for (const row of rawData) {
+        const x = row[xAxisKey];
+        const g = row[groupBy];
+        const v = row[valueKey];
+        if (!xBuckets.has(x)) {
+          xBuckets.set(x, { [xAxisKey]: x });
+        }
+        const bucket = xBuckets.get(x);
+        bucket[g] = v;
+        groups.add(g);
+      }
+      rawData = Array.from(xBuckets.values());
+      yAxisKeys = Array.from(groups.values());
+    }
+
     // Enhanced secondary axis detection
     const secondaryAxisKeys = chartConfig?.yAxisSecondary || [];
     const singleSecondaryAxis = chartConfig?.secondaryAxis || '';
@@ -390,8 +411,8 @@ const DataVisualization = ({
     // Helper function to get axis label
     const getAxisLabel = (axisKeys, isSecondary = false) => {
       if (axisKeys.length === 0) return '';
-      if (axisKeys.length === 1) return axisKeys[0];
-      return isSecondary ? 'Secondary Values' : 'Primary Values';
+      if (axisKeys.length === 1) return chartConfig?.valueLabel || axisKeys[0];
+      return isSecondary ? 'Secondary Values' : (chartConfig?.valueLabel || 'Values');
     };
 
     switch (effectiveChartType) {
@@ -413,7 +434,25 @@ const DataVisualization = ({
                     label={{ value: getAxisLabel(finalSecondaryAxisKeys, true), angle: 90, position: 'insideRight' }}
                   />
                 )}
-                <RechartsTooltip />
+                <RechartsTooltip content={({ active, payload, label }) => {
+                  if (!active || !payload) return null;
+                  const items = [...payload].sort((a,b) => {
+                    const av = typeof a.value === 'number' ? a.value : parseFloat(a.value);
+                    const bv = typeof b.value === 'number' ? b.value : parseFloat(b.value);
+                    return (isNaN(bv)?0:bv) - (isNaN(av)?0:av);
+                  });
+                  return (
+                    <Paper sx={{ p: 1 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 'bold' }}>{label}</Typography>
+                      {items.map((it, idx) => (
+                        <Box key={idx} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                          <span style={{ width: 10, height: 10, background: it.color }} />
+                          <Typography variant="caption">{it.name}: {it.value}</Typography>
+                        </Box>
+                      ))}
+                    </Paper>
+                  );
+                }} />
                 <Legend />
                 
                 {primaryAxisKeys.map((key, index) => (
@@ -461,7 +500,25 @@ const DataVisualization = ({
                     label={{ value: getAxisLabel(finalSecondaryAxisKeys, true), angle: 90, position: 'insideRight' }}
                   />
                 )}
-                <RechartsTooltip />
+                <RechartsTooltip content={({ active, payload, label }) => {
+                  if (!active || !payload) return null;
+                  const items = [...payload].sort((a,b) => {
+                    const av = typeof a.value === 'number' ? a.value : parseFloat(a.value);
+                    const bv = typeof b.value === 'number' ? b.value : parseFloat(b.value);
+                    return (isNaN(bv)?0:bv) - (isNaN(av)?0:av);
+                  });
+                  return (
+                    <Paper sx={{ p: 1 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 'bold' }}>{label}</Typography>
+                      {items.map((it, idx) => (
+                        <Box key={idx} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                          <span style={{ width: 10, height: 10, background: it.color }} />
+                          <Typography variant="caption">{it.name}: {it.value}</Typography>
+                        </Box>
+                      ))}
+                    </Paper>
+                  );
+                }} />
                 <Legend />
                 
                 {primaryAxisKeys.map((key, index) => (
@@ -505,7 +562,25 @@ const DataVisualization = ({
                     label={{ value: getAxisLabel(finalSecondaryAxisKeys, true), angle: 90, position: 'insideRight' }}
                   />
                 )}
-                <RechartsTooltip />
+                <RechartsTooltip content={({ active, payload, label }) => {
+                  if (!active || !payload) return null;
+                  const items = [...payload].sort((a,b) => {
+                    const av = typeof a.value === 'number' ? a.value : parseFloat(a.value);
+                    const bv = typeof b.value === 'number' ? b.value : parseFloat(b.value);
+                    return (isNaN(bv)?0:bv) - (isNaN(av)?0:av);
+                  });
+                  return (
+                    <Paper sx={{ p: 1 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 'bold' }}>{label}</Typography>
+                      {items.map((it, idx) => (
+                        <Box key={idx} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                          <span style={{ width: 10, height: 10, background: it.color }} />
+                          <Typography variant="caption">{it.name}: {it.value}</Typography>
+                        </Box>
+                      ))}
+                    </Paper>
+                  );
+                }} />
                 <Legend />
                 
                 {primaryAxisKeys.map((key, index) => (
@@ -551,7 +626,25 @@ const DataVisualization = ({
                     label={{ value: getAxisLabel(finalSecondaryAxisKeys, true), angle: 90, position: 'insideRight' }}
                   />
                 )}
-                <RechartsTooltip />
+                <RechartsTooltip content={({ active, payload, label }) => {
+                  if (!active || !payload) return null;
+                  const items = [...payload].sort((a,b) => {
+                    const av = typeof a.value === 'number' ? a.value : parseFloat(a.value);
+                    const bv = typeof b.value === 'number' ? b.value : parseFloat(b.value);
+                    return (isNaN(bv)?0:bv) - (isNaN(av)?0:av);
+                  });
+                  return (
+                    <Paper sx={{ p: 1 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 'bold' }}>{label}</Typography>
+                      {items.map((it, idx) => (
+                        <Box key={idx} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                          <span style={{ width: 10, height: 10, background: it.color }} />
+                          <Typography variant="caption">{it.name}: {it.value}</Typography>
+                        </Box>
+                      ))}
+                    </Paper>
+                  );
+                }} />
                 <Legend />
                 
                 {primaryAxisKeys.map((key, index) => (

@@ -770,9 +770,36 @@ class VisualizationAgent(BaseAgent):
             spec = viz.generate_visualization(data, query, sql="")
             if spec:
                 if spec.get("chartType") == "vega_lite":
-                    return {"chart_type": "vega_lite", "config": spec.get("vegaSpec", {}), "confidence": 0.9}
-                # Legacy compatibility
-                return {"chart_type": spec.get("chartType", "bar"), "config": spec.get("options", {}), "confidence": 0.85}
+                    # UI may not support vega_lite yet. Provide a safe fallback payload
+                    raw_opts = spec.get("options", {}) or {}
+                    x_field = raw_opts.get("xField")
+                    y_field = raw_opts.get("yField")
+                    series_field = raw_opts.get("seriesField")
+                    mapped_opts = {
+                        "xAxis": x_field or "Month",
+                        "yAxis": [y_field] if y_field else [self._infer_first_numeric_key(data)],
+                        "groupBy": series_field or "",
+                        "data": data,
+                        "valueLabel": y_field or self._infer_first_numeric_key(data),
+                    }
+                    # Preserve Vega-Lite spec for future UI support
+                    mapped_opts["vegaSpec"] = spec.get("vegaSpec", {})
+                    fallback_type = "line" if (mapped_opts.get("xAxis") or "").lower() in {"month", "date", "actualdate", "day", "year"} else "bar"
+                    return {"chart_type": fallback_type, "config": mapped_opts, "confidence": 0.9}
+                # Legacy compatibility for non-vega outputs
+                raw_opts = spec.get("options", {}) or {}
+                if "data" not in raw_opts:
+                    raw_opts["data"] = data
+                # Also normalize to xAxis/yAxis to match UI reducer
+                if raw_opts.get("xField") or raw_opts.get("yField"):
+                    raw_opts = {
+                        **raw_opts,
+                        "xAxis": raw_opts.get("xField", "Month"),
+                        "yAxis": [raw_opts.get("yField")] if raw_opts.get("yField") else [self._infer_first_numeric_key(data)],
+                        "groupBy": raw_opts.get("seriesField", ""),
+                        "valueLabel": raw_opts.get("yField") or self._infer_first_numeric_key(data),
+                    }
+                return {"chart_type": spec.get("chartType", "bar"), "config": raw_opts, "confidence": 0.85}
         except Exception:
             pass
 
@@ -789,6 +816,16 @@ class VisualizationAgent(BaseAgent):
             "confidence": 0.8,
             "config": {"title": f"Data Visualization for: {query[:50]}...", "xAxis": headers[0] if headers else "", "yAxis": headers[1:] if len(headers) > 1 else []}
         }
+
+    def _infer_first_numeric_key(self, data: List[dict]) -> str:
+        if not data:
+            return "Value"
+        first = data[0]
+        for k, v in first.items():
+            if isinstance(v, (int, float)):
+                return k
+        # default
+        return "Value"
 
 
 class WorkflowEngine:
