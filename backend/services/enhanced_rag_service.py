@@ -21,6 +21,7 @@ from backend.core.executor import SQLExecutor
 from backend.core.feedback_storage import FeedbackStorage, FeedbackRecord, ExecutionTrace
 from backend.core.advanced_retrieval import AdvancedRetrieval, ContextualRetrieval, RetrievalResult
 from backend.config import get_settings
+from backend.core.temporal_processor import TemporalConstraintProcessor, TemporalConstraints
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,9 @@ class EnhancedRAGService:
         # Initialize advanced retrieval system
         self.advanced_retrieval = AdvancedRetrieval()
         self.contextual_retrieval = ContextualRetrieval(self.advanced_retrieval)
+        
+        # Centralized temporal processor
+        self.temporal_processor = TemporalConstraintProcessor({})
         
         # Statistics tracking
         self.stats = {
@@ -1078,10 +1082,13 @@ class EnhancedRAGService:
             if not self._initialized:
                 await self.initialize()
                 
-            # Step 1: Extract semantic context using Wren AI integration
-            semantic_context = await self.wren_ai_integration.extract_semantic_context(query)
+            # Extract semantic context using Wren AI integration
+            semantic_context = await self.wren_ai_integration.extract_semantic_context(query) if hasattr(self, 'wren_ai_integration') else {}
             
-            # Step 2-5: Unified enhanced pipeline with multi-candidate generation & validation
+            # Extract temporal constraints once
+            temporal_constraints = self.temporal_processor.extract_temporal_constraints(query)
+            
+            # Unified enhanced pipeline
             logger.info(f"🚀 Starting unified enhanced pipeline for query: {query}")
             try:
                 unified_result = await self._run_unified_enhanced_pipeline(query, semantic_context)
@@ -1092,10 +1099,10 @@ class EnhancedRAGService:
                 unified_result = {"success": False, "error": f"Unified pipeline exception: {str(e)}"}
                 result = unified_result
             
-            # If unified pipeline could not produce a successful result, fall back to adaptive strategy
+            # Fallback strategy
             if not result.get("success", False):
                 logger.info(f"🚀 Unified pipeline failed, falling back to adaptive strategy")
-                confidence = semantic_context.get("confidence", 0.0)
+                confidence = semantic_context.get("confidence", 0.0) if isinstance(semantic_context, dict) else 0.0
                 actual_mode = self._determine_processing_mode(confidence, processing_mode)
                 if actual_mode == ProcessingMode.SEMANTIC_FIRST:
                     result = await self._process_semantic_first(query, semantic_context)
@@ -1105,24 +1112,13 @@ class EnhancedRAGService:
                     result = await self._process_agentic(query, semantic_context)
                 else:
                     result = await self._process_traditional(query, semantic_context)
-
-            # Robust fallbacks: try other strategies if the chosen one fails
-            if not result.get("success", False):
-                # Try semantic-first
-                try_semantic = await self._process_semantic_first(query, semantic_context)
-                if try_semantic.get("success", False):
-                    result = try_semantic
-                else:
-                    # Try hybrid
-                    try_hybrid = await self._process_hybrid(query, semantic_context)
-                    if try_hybrid.get("success", False):
-                        result = try_hybrid
-                    else:
-                        # Finally, traditional
-                        try_traditional = await self._process_traditional(query, semantic_context)
-                        if try_traditional.get("success", False):
-                            result = try_traditional
-                
+            
+            # Ensure temporal constraints are applied regardless of path
+            if result and result.get("sql"):
+                sql_with_temporal = self.temporal_processor.apply_temporal_constraints(result["sql"], temporal_constraints)
+                if sql_with_temporal != result["sql"]:
+                    result["sql"] = sql_with_temporal
+            
             # Step 4: Store feedback and execution traces
             if session_id and user_id:
                 await self._store_query_feedback(
