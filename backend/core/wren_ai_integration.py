@@ -103,6 +103,11 @@ class WrenAIIntegration:
         try:
             if self.db_path:
                 await self._augment_mdl_from_sqlite()
+                # Persist augmented MDL so it can be inspected and reused
+                try:
+                    await self._export_mdl_to_json("config/power-sector-mdl.json")
+                except Exception as e:
+                    logger.warning(f"Failed to export augmented MDL: {e}")
         except Exception as e:
             logger.warning(f"Failed to augment MDL from SQLite: {e}")
         await self._populate_advanced_vector_store()
@@ -516,6 +521,32 @@ class WrenAIIntegration:
                 "expression": "MAX(fs.MaximumDemand)",
                 "description": "Peak demand (MW) for a state",
             },
+            # Transmission / International link flow (example generic metrics)
+            "transmission_flow_total": {
+                "model": "FactTransmissionLinkFlow",
+                "expression": "SUM(fs.Flow)",
+                "description": "Total transmission flow",
+                "granularity": ["year", "month", "day"],
+            },
+            "international_link_flow_total": {
+                "model": "FactInternationalTransmissionLinkFlow",
+                "expression": "SUM(fs.Flow)",
+                "description": "Total international link flow",
+                "granularity": ["year", "month", "day"],
+            },
+            # Time-block tables (sub-daily awareness)
+            "timeblock_power_total": {
+                "model": "FactTimeBlockPowerData",
+                "expression": "SUM(fs.Power)",
+                "description": "Total power by time-block",
+                "granularity": ["time_block", "day", "month", "year"],
+            },
+            "timeblock_generation_total": {
+                "model": "FactTimeBlockGeneration",
+                "expression": "SUM(fs.Generation)",
+                "description": "Total generation by time-block",
+                "granularity": ["time_block", "day", "month", "year"],
+            },
         }
 
         dimensions = {
@@ -523,6 +554,7 @@ class WrenAIIntegration:
             "state_name": {"model": "DimStates", "column": "s.StateName"},
             "month": {"model": "DimDates", "expression": "strftime('%Y-%m', d.ActualDate)"},
             "year": {"model": "DimDates", "expression": "strftime('%Y', d.ActualDate)"},
+            "day": {"model": "DimDates", "expression": "strftime('%Y-%m-%d', d.ActualDate)"},
         }
 
         self.mdl_schema = MDLSchema(
@@ -554,12 +586,47 @@ class WrenAIIntegration:
             cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
             tables = [r[0] for r in cur.fetchall()]
 
+            # Load units mapping if available (DimUnits + MetaTableColumnUnits)
+            unit_map: Dict[str, Dict[str, str]] = {}
+            try:
+                if "DimUnits" in tables and "MetaTableColumnUnits" in tables:
+                    cur.execute(
+                        """
+                        SELECT mtc.SchemaName, mtc.TableName, mtc.ColumnName, du.UnitName, du.UnitSymbol, du.UnitCategory
+                        FROM MetaTableColumnUnits mtc
+                        JOIN DimUnits du ON mtc.UnitID = du.UnitID
+                        """
+                    )
+                    for row in cur.fetchall():
+                        schema_name = str(row[0])  # 'main' by default in SQLite
+                        tname = str(row[1])
+                        cname = str(row[2])
+                        uname = str(row[3])
+                        unit_map.setdefault(tname, {})[cname] = uname
+            except Exception:
+                unit_map = {}
+
             # Load columns per table
             table_to_cols: Dict[str, Dict[str, Any]] = {}
             for t in tables:
                 cur.execute(f"PRAGMA table_info('{t}')")
                 cols = [dict(name=row[1], type=row[2]) for row in cur.fetchall()]
-                table_to_cols[t] = {c["name"]: {"type": c["type"]} for c in cols}
+                # Units from metadata tables when present (no guessing)
+                # Prefer exact table/column case; fallback to case-insensitive match
+                table_units = unit_map.get(t, {})
+                if not table_units:
+                    for ut, mapping in unit_map.items():
+                        if ut.lower() == t.lower():
+                            table_units = mapping
+                            break
+                table_to_cols[t] = {
+                    c["name"]: {
+                        "type": c["type"],
+                        **({"unit": (table_units.get(c["name"]) or next((v for k,v in table_units.items() if k.lower()==c["name"].lower()), None))}
+                           if (table_units.get(c["name"]) or any(k.lower()==c["name"].lower() for k in table_units.keys())) else {})
+                    }
+                    for c in cols
+                }
 
                 # Compute heuristic hints
                 def _pick_preferred_time(col_names: List[str]) -> Optional[str]:
@@ -594,18 +661,36 @@ class WrenAIIntegration:
                     return out
 
                 col_names_list = list(table_to_cols[t].keys())
+                # basic semantic role and hints
+                role = "dimension" if t.lower().startswith("dim") else "fact"
+                # preferred categorical column guess
+                cat_guess = None
+                for candidate in ["RegionName", "StateName", "CountryName", "SourceName", "LineIdentifier", "MechanismName"]:
+                    if candidate in col_names_list:
+                        cat_guess = candidate
+                        break
+                # collect per-column unit hints (from metadata mapping only)
+                unit_hints = {cn: cd.get("unit") for cn, cd in table_to_cols[t].items() if cd.get("unit")}
                 hints = {
                     "preferred_time_column": _pick_preferred_time(col_names_list),
                     "preferred_value_columns": _pick_preferred_values(col_names_list),
                     "has_date_fk": ("DateID" in col_names_list),
+                    "preferred_category": cat_guess,
+                    "role": role,
+                    "units": unit_hints,
                 }
 
                 if t not in self.mdl_schema.models:
                     self.mdl_schema.models[t] = MDLNode(
                         node_type=MDLNodeType.MODEL,
                         name=t,
-                        definition={"columns": table_to_cols[t], "description": f"Auto-imported from SQLite: {t}", "hints": hints},
-                        metadata={}
+                        definition={
+                            "columns": table_to_cols[t],
+                            "description": f"Auto-imported from SQLite: {t}",
+                            "hints": hints,
+                            "synonyms": [t, t.replace("_", " "), t.lower(), t.replace("_", "").lower()],
+                        },
+                        metadata={"business_name": t.replace("Fact", "").replace("Dim", "").strip()}
                     )
                 else:
                     # Merge missing columns
@@ -616,6 +701,11 @@ class WrenAIIntegration:
                     for hk, hv in hints.items():
                         if hk not in existing_hints or not existing_hints[hk]:
                             existing_hints[hk] = hv
+                    # Ensure synonyms exists
+                    syns = self.mdl_schema.models[t].definition.setdefault("synonyms", [])
+                    for s in [t, t.replace("_", " "), t.lower(), t.replace("_", "").lower()]:
+                        if s not in syns:
+                            syns.append(s)
 
             # Load FK relationships
             for t in tables:
@@ -641,6 +731,41 @@ class WrenAIIntegration:
                         self.mdl_schema.relationships.append(rel)
         finally:
             conn.close()
+
+    async def _export_mdl_to_json(self, out_path: str):
+        """Export the in-memory MDL schema to a JSON file for offline inspection and reuse."""
+        if not self.mdl_schema:
+            return
+        def _node_to_dict(n: MDLNode) -> Dict[str, Any]:
+            return {
+                "name": n.name,
+                "definition": n.definition,
+                "metadata": n.metadata,
+            }
+        data = {
+            "models": {k: _node_to_dict(v) for k, v in (self.mdl_schema.models or {}).items()},
+            "relationships": [
+                {
+                    "source": r.source_model,
+                    "target": r.target_model,
+                    "type": r.join_type,
+                    "conditions": r.join_conditions,
+                    "business_meaning": r.business_meaning,
+                    "cardinality": r.cardinality,
+                    "required": r.is_required,
+                }
+                for r in (self.mdl_schema.relationships or [])
+            ],
+            "metrics": {k: _node_to_dict(v) for k, v in (self.mdl_schema.metrics or {}).items()},
+            "dimensions": {k: _node_to_dict(v) for k, v in (self.mdl_schema.dimensions or {}).items()},
+            "business_glossary": self.mdl_schema.business_glossary or {},
+            "metadata": self.mdl_schema.metadata or {},
+        }
+        p = Path(out_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        logger.info(f"Exported augmented MDL to {p}")
         
     async def _populate_advanced_vector_store(self):
         """Populate advanced vector store with MDL knowledge"""
@@ -797,6 +922,20 @@ class WrenAIIntegration:
                     
             # Step 2: MDL relationship inference
             mdl_context = await self._infer_mdl_context(natural_language_query, search_results)
+            # Prefer models whose synonyms appear explicitly in the query
+            try:
+                ql = (natural_language_query or "").lower()
+                explicit = []
+                for name, node in (self.mdl_schema.models or {}).items():
+                    syns = (node.definition or {}).get("synonyms", [])
+                    if any(s for s in syns if isinstance(s, str) and s and s.lower() in ql):
+                        explicit.append({"name": name, "score": 1.0})
+                if explicit:
+                    # put explicit models to the front
+                    existing = mdl_context.get("relevant_models", [])
+                    mdl_context["relevant_models"] = explicit + existing
+            except Exception:
+                pass
             
             # Step 3: Business entity extraction
             business_entities = self._extract_business_entities(natural_language_query, search_results)
@@ -917,12 +1056,15 @@ class WrenAIIntegration:
         # Detect explicit table mentions to guide dynamic model selection
         try:
             import re
-            # split on non-word boundaries and dots for table.column hints
             tokens = set(re.split(r"[^A-Za-z0-9_.]+", query_lower))
             mentioned = []
-            if self.mdl_schema:
-                for table in self.mdl_schema.models.keys():
-                    if table.lower() in tokens or table.lower().replace('_', '') in tokens:
+            if self.mdl_schema and self.mdl_schema.models:
+                for table, node in self.mdl_schema.models.items():
+                    t_low = table.lower()
+                    syns = (node.definition or {}).get('synonyms', [])
+                    # token or substring match on name/synonyms/sanitized
+                    candidates = set([t_low, t_low.replace('_','')]) | {str(s).lower() for s in syns}
+                    if any((c in tokens) for c in candidates) or any(c in query_lower for c in candidates):
                         mentioned.append(table)
             if mentioned:
                 mappings["explicit_tables"] = ",".join(sorted(set(mentioned)))
@@ -955,13 +1097,38 @@ class WrenAIIntegration:
             # Post-process using MDL hints to correct common model/time issues, include original query for temporal refinement
             mdl_ctx_with_query = dict(mdl_context or {})
             mdl_ctx_with_query['original_query'] = query
+            try:
+                mdl_ctx_with_query['explicit_tables'] = semantic_mappings.get('explicit_tables')
+            except Exception:
+                pass
             extracted_sql = self._postprocess_sql_with_mdl_hints(extracted_sql, mdl_ctx_with_query)
             
+            # If explicit tables are mentioned and SQL does not use them, synthesize a correct SQL using MDL
+            try:
+                explicit = semantic_mappings.get("explicit_tables")
+                if explicit:
+                    wanted = [t.strip() for t in explicit.split(',') if t.strip()]
+                    lower_sql = (extracted_sql or '').lower()
+                    chosen = next((t for t in wanted if t.lower() in lower_sql), None)
+                    if not chosen and wanted:
+                        synthesized = self._synthesize_sql_for_table(wanted[0], query)
+                        if synthesized:
+                            extracted_sql = synthesized
+            except Exception:
+                pass
+
+            # Attach MDL-driven visualization defaults for UI (xAxis/yAxis/groupBy) when detectable
+            plot_options = self._infer_plot_options_from_sql(extracted_sql)
+            if not plot_options:
+                # Try metric-driven defaults if SQL heuristics failed
+                plot_options = self._infer_plot_options_from_metric(query, mdl_context)
+
             return {
                 "sql": extracted_sql,
                 "mdl_context": mdl_context,
                 "confidence": semantic_context.get("confidence", 0.0),
-                "business_entities": business_entities
+                "business_entities": business_entities,
+                "plot": {"chartType": "bar", "options": plot_options} if plot_options else None,
             }
             
         except Exception as e:
@@ -1078,6 +1245,19 @@ class WrenAIIntegration:
             if not sql or not mdl_context:
                 return sql
             import re as _re
+            # If explicit tables requested and SQL doesn't use them, synthesize
+            try:
+                explicit = mdl_context.get('explicit_tables')
+                if explicit:
+                    wanted = [t.strip() for t in explicit.split(',') if t.strip()]
+                    lw = [(t.lower(), t) for t in wanted]
+                    lower_sql = (sql or '').lower()
+                    if not any(tl in lower_sql for tl, _ in lw):
+                        synth = self._synthesize_sql_for_table(wanted[0], mdl_context.get('original_query', ''))
+                        if synth:
+                            return synth
+            except Exception:
+                pass
             # Detect fact table and alias actually used
             m = _re.search(r"FROM\s+(\w+)\s+([a-zA-Z]\\w*)", sql, _re.IGNORECASE)
             fact_table = m.group(1) if m else None
@@ -1099,9 +1279,9 @@ class WrenAIIntegration:
             has_date_fk = hints.get('has_date_fk', False)
 
             fixed = sql
+            table_lower = (fact_table or '').lower()
             # 1) Replace EnergyMet in non-energy models with preferred value column
-            model_lower = (fact_table or '').lower()
-            is_energy_model = ('allindiadailysummary' in model_lower) or ('statedailyenergy' in model_lower)
+            is_energy_model = ('allindiadailysummary' in table_lower) or ('statedailyenergy' in table_lower)
             if ('energymet' in fixed.lower()) and not is_energy_model and preferred_values:
                 pv = preferred_values[0]
                 fixed = _re.sub(rf"\b{_re.escape(fact_alias)}\.EnergyMet\b", fact_alias + '.' + pv, fixed)
@@ -1114,8 +1294,36 @@ class WrenAIIntegration:
                 fixed = _re.sub(r"strftime\('%Y-%m',\s*d\.ActualDate\)", f"strftime('%Y-%m', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
                 fixed = _re.sub(r"strftime\('%Y',\s*d\.ActualDate\)", f"strftime('%Y', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
 
+            # 2b) Model-specific time column enforcement
+            if ('factinternationaltransmissionlinkflow' in table_lower or 'facttransmissionlinkflow' in table_lower) and preferred_time:
+                # ensure we use fs.<preferred_time> and not d.ActualDate
+                fixed = _re.sub(r"JOIN\s+DimDates\s+d\s+ON\s+[^\s]+", "", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"strftime\('\%Y-\%m',\s*d\.ActualDate\)", f"strftime('%Y-%m', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"strftime\('\%Y',\s*d\.ActualDate\)", f"strftime('%Y', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
+                fixed = fixed.replace('d.ActualDate', f'{fact_alias}.{preferred_time}')
+            if ('facttimeblockpowerdata' in table_lower or 'facttimeblockgeneration' in table_lower) and preferred_time:
+                fixed = _re.sub(r"JOIN\s+DimDates\s+d\s+ON\s+[^\s]+", "", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"strftime\('\%Y-\%m',\s*d\.ActualDate\)", f"strftime('%Y-%m', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"strftime\('\%Y',\s*d\.ActualDate\)", f"strftime('%Y', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
+                fixed = fixed.replace('d.ActualDate', f'{fact_alias}.{preferred_time}')
+
+            # 2c) Country exchange model: ensure joins and date usage (this model typically has DateID and CountryID)
+            if 'factcountrydailyexchange' in table_lower:
+                # Ensure DimCountries join when CountryName appears
+                if 'CountryName' in fixed or 'countryname' in fixed.lower():
+                    if not _re.search(r"JOIN\s+DimCountries\s+dc\s+ON\s+[^\s]+", fixed, _re.IGNORECASE):
+                        fixed = fixed.replace(f"FROM {fact_table} {fact_alias}", f"FROM {fact_table} {fact_alias} JOIN DimCountries dc ON {fact_alias}.CountryID = dc.CountryID")
+                # Ensure DimDates join when strftime on d.ActualDate used
+                if "strftime('" in fixed and 'd.ActualDate' in fixed and not _re.search(r"JOIN\s+DimDates\s+d\s+ON\s+[^\s]+", fixed, _re.IGNORECASE):
+                    fixed = fixed.replace(f"FROM {fact_table} {fact_alias}", f"FROM {fact_table} {fact_alias} JOIN DimDates d ON {fact_alias}.DateID = d.DateID")
+
             # 3) Clean f.Table.Column → alias.Column noise
             fixed = _re.sub(r"\bf\.[A-Za-z_]\w+\.", fact_alias + '.', fixed)
+
+            # 3b) Normalize DimGenerationSources alias to dgs for consistency
+            if _re.search(r"JOIN\s+DimGenerationSources\s+(\w+)\s+ON", fixed, _re.IGNORECASE):
+                fixed = _re.sub(r"JOIN\s+DimGenerationSources\s+\w+\s+ON", "JOIN DimGenerationSources dgs ON", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"\bgs\.SourceName\b", "dgs.SourceName", fixed)
 
             # 4) Temporal refinement: inject month/day filters if mentioned in query text available via mdl_context
             try:
@@ -1371,3 +1579,170 @@ class WrenAIIntegration:
         """
         
         return prompt 
+
+    def _infer_plot_options_from_sql(self, sql: str) -> Optional[Dict[str, Any]]:
+        """Lightweight heuristic to propose plot options (xAxis/yAxis/groupBy) from SQL.
+        Helps UI render grouped series consistently.
+        """
+        try:
+            import re as _re
+            lower = (sql or "").lower()
+            opts: Dict[str, Any] = {}
+            # xAxis detection: Month/Year/Day
+            if "strftime('%y-%m'".replace("%y", "%Y").lower() in lower or "strftime('%y-%m'" in lower:
+                opts["xAxis"] = "Month"
+            elif "strftime('%y'".replace("%y", "%Y").lower() in lower:
+                opts["xAxis"] = "Year"
+            elif "strftime('%y-%m-%d'".replace("%y", "%Y").lower() in lower:
+                opts["xAxis"] = "Day"
+            # groupBy detection for common dims
+            if "group by r.regionname" in lower:
+                opts["groupBy"] = "RegionName"
+            elif "group by s.statename" in lower:
+                opts["groupBy"] = "StateName"
+            elif "group by dgs.sourcename" in lower or "group by gs.sourcename" in lower:
+                opts["groupBy"] = "SourceName"
+            elif "group by dc.countryname" in lower:
+                opts["groupBy"] = "CountryName"
+            # yAxis detection: pick first alias if present
+            m = _re.search(r"\sAS\s+([A-Za-z_][A-Za-z0-9_]*)", sql, _re.IGNORECASE)
+            if m:
+                opts["yAxis"] = [m.group(1)]
+                opts["valueLabel"] = m.group(1)
+            else:
+                # fallback common metric alias
+                for alias in ["Value", "TotalEnergy", "TotalFlow", "TotalGeneration", "Central", "MonthlyEnergyConsumption"]:
+                    if alias.lower() in lower:
+                        opts["yAxis"] = [alias]
+                        opts["valueLabel"] = alias
+                        break
+            return opts if (opts.get("xAxis") and opts.get("yAxis")) else None
+        except Exception:
+            return None
+
+    def _infer_plot_options_from_metric(self, query: str, mdl_context: Dict) -> Optional[Dict[str, Any]]:
+        """Fallback plot defaults based on metric/domain keywords and MDL hints."""
+        try:
+            ql = (query or "").lower()
+            opts: Dict[str, Any] = {}
+            # xAxis preference by temporal words
+            if any(k in ql for k in ["monthly", "per month", "by month"]):
+                opts["xAxis"] = "Month"
+            elif any(k in ql for k in ["daily", "per day", "day wise", "day-wise"]):
+                opts["xAxis"] = "Day"
+            elif any(k in ql for k in ["yearly", "per year", "annual"]):
+                opts["xAxis"] = "Year"
+            else:
+                opts["xAxis"] = "Month"
+
+            # groupBy preference by entity
+            if any(k in ql for k in ["all regions", "by region", "regionwise", "region wise"]):
+                opts["groupBy"] = "RegionName"
+            elif any(k in ql for k in ["all states", "by state", "statewise", "state wise"]):
+                opts["groupBy"] = "StateName"
+            elif any(k in ql for k in ["by source", "generation by source", "source wise"]):
+                opts["groupBy"] = "SourceName"
+            elif any(k in ql for k in ["country", "countries"]):
+                opts["groupBy"] = "CountryName"
+
+            # yAxis label from metric keywords
+            if any(k in ql for k in ["shortage"]):
+                opts["yAxis"] = ["TotalEnergyShortage"]
+                opts["valueLabel"] = "TotalEnergyShortage"
+            elif any(k in ql for k in ["maximum demand", "peak demand"]):
+                opts["yAxis"] = ["PeakDemand"]
+                opts["valueLabel"] = "PeakDemand"
+            elif any(k in ql for k in ["outage"]):
+                opts["yAxis"] = ["Outage"]
+                opts["valueLabel"] = "Outage"
+            elif any(k in ql for k in ["generation"]):
+                opts["yAxis"] = ["TotalGeneration"]
+                opts["valueLabel"] = "TotalGeneration"
+            else:
+                opts["yAxis"] = ["Value"]
+                opts["valueLabel"] = "Value"
+
+            return opts
+        except Exception:
+            return None
+
+    def _synthesize_sql_for_table(self, table_name: str, query: str) -> Optional[str]:
+        """Build MDL-aware SQL for a specific table when explicitly requested."""
+        try:
+            import re
+            schema = getattr(self, 'mdl_schema', None)
+            node = schema.models.get(table_name) if (schema and schema.models) else None
+            hints = (node.definition or {}).get('hints', {}) if node else {}
+            pvals = hints.get('preferred_value_columns') or []
+            ptime = hints.get('preferred_time_column')
+            has_date_fk = hints.get('has_date_fk', False)
+            value_col = None
+            tl = table_name.lower()
+            # Choose value column by domain
+            if 'factdailygenerationbreakdown' in tl:
+                value_col = 'GenerationAmount'
+            elif 'facttimeblockpowerdata' in tl:
+                value_col = 'Power'
+            elif 'facttimeblockgeneration' in tl:
+                value_col = 'Generation'
+            elif 'factinternationaltransmissionlinkflow' in tl or 'facttransmissionlinkflow' in tl:
+                value_col = 'Flow'
+            elif pvals:
+                value_col = pvals[0]
+            if not value_col:
+                return None
+
+            ql = (query or '').lower()
+            is_monthly = any(k in ql for k in ["monthly", "per month", "by month"])
+            year_m = re.search(r"\b(19|20)\d{2}\b", ql)
+            year = year_m.group(0) if year_m else None
+
+            # Table-specific joins
+            joins = []
+            if 'factdailygenerationbreakdown' in tl:
+                joins.append("JOIN DimGenerationSources dgs ON fs.GenerationSourceID = dgs.GenerationSourceID")
+            if has_date_fk and is_monthly:
+                joins.append("JOIN DimDates d ON fs.DateID = d.DateID")
+
+            if is_monthly:
+                if has_date_fk:
+                    sql = (
+                        f"SELECT "
+                        + ("dgs.SourceName AS Source, " if 'factdailygenerationbreakdown' in tl else "")
+                        + "strftime('%Y-%m', d.ActualDate) AS Month, "
+                        + f"ROUND(SUM(fs.{value_col}), 2) AS Value FROM {table_name} fs "
+                        + (" ".join(j for j in joins) + " " if joins else "")
+                        + (f"WHERE strftime('%Y', d.ActualDate) = '{year}' " if year else "")
+                        + ("GROUP BY " + ("dgs.SourceName, " if 'factdailygenerationbreakdown' in tl else "") + "Month ORDER BY Month")
+                    )
+                elif ptime:
+                    sql = (
+                        f"SELECT "
+                        + ("dgs.SourceName AS Source, " if 'factdailygenerationbreakdown' in tl else "")
+                        + f"strftime('%Y-%m', fs.{ptime}) AS Month, "
+                        + f"ROUND(SUM(fs.{value_col}), 2) AS Value FROM {table_name} fs "
+                        + (" ".join(j for j in joins if not j.startswith("JOIN DimDates")) + " " if joins else "")
+                        + (f"WHERE strftime('%Y', fs.{ptime}) = '{year}' " if year else "")
+                        + ("GROUP BY " + ("dgs.SourceName, " if 'factdailygenerationbreakdown' in tl else "") + "Month ORDER BY Month")
+                    )
+                else:
+                    return None
+            else:
+                if has_date_fk:
+                    sql = (
+                        f"SELECT ROUND(SUM(fs.{value_col}), 2) AS Value FROM {table_name} fs "
+                        + (" ".join(j for j in joins if not j.startswith("JOIN DimDates")) + " " if joins else "")
+                        + "JOIN DimDates d ON fs.DateID = d.DateID "
+                        + (f"WHERE strftime('%Y', d.ActualDate) = '{year}'" if year else "")
+                    )
+                elif ptime:
+                    sql = (
+                        f"SELECT ROUND(SUM(fs.{value_col}), 2) AS Value FROM {table_name} fs "
+                        + (" ".join(j for j in joins) + " " if joins else "")
+                        + (f"WHERE strftime('%Y', fs.{ptime}) = '{year}'" if year else "")
+                    )
+                else:
+                    return None
+            return sql
+        except Exception:
+            return None

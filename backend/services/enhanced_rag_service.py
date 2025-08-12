@@ -1279,6 +1279,18 @@ class EnhancedRAGService:
         except Exception as e:
             logger.warning(f"Heuristic candidate failed: {e}")
 
+        # Candidate 5: Explicit-table builder using MDL hints
+        try:
+            explicit_tables_str = (semantic_context or {}).get("semantic_mappings", {}).get("explicit_tables")
+            if explicit_tables_str:
+                explicit_tables = [t.strip() for t in explicit_tables_str.split(',') if t.strip()]
+                for tname in explicit_tables:
+                    sql = self._build_explicit_table_sql(tname, query)
+                    if sql:
+                        candidates.append({"source": "explicit_builder", "sql": sql})
+        except Exception as e:
+            logger.warning(f"Explicit-table builder failed: {e}")
+
         # Deduplicate by normalized SQL
         seen = set()
         unique: List[Dict[str, Any]] = []
@@ -1308,6 +1320,21 @@ class EnhancedRAGService:
             repaired = self._auto_repair_sql(raw_sql)
             # Always apply temporal refinement and validation, but preserve explicit table usage when appropriate
             corrected = self._validate_and_correct_sql(repaired, query)
+            # Schema-driven join injection using FK patterns (lightweight)
+            try:
+                if "JOIN DimDates" not in corrected and "strftime('%Y'" in corrected:
+                    # If any date function is present but no DimDates join, inject it for DateID models
+                    if any(t in corrected for t in ["FactAllIndiaDailySummary", "FactStateDailyEnergy"]):
+                        corrected = corrected.replace(" FROM ", " FROM ")
+                        # naive injection after first FROM <fact> fs
+                        corrected = corrected.replace(" FROM FactAllIndiaDailySummary fs ", " FROM FactAllIndiaDailySummary fs JOIN DimDates d ON fs.DateID = d.DateID ")
+                        corrected = corrected.replace(" FROM FactStateDailyEnergy fs ", " FROM FactStateDailyEnergy fs JOIN DimDates d ON fs.DateID = d.DateID ")
+                if "JOIN DimRegions" not in corrected and ".RegionName" in corrected:
+                    corrected = corrected.replace(" FROM FactAllIndiaDailySummary fs ", " FROM FactAllIndiaDailySummary fs JOIN DimRegions r ON fs.RegionID = r.RegionID ")
+                if "JOIN DimStates" not in corrected and ".StateName" in corrected:
+                    corrected = corrected.replace(" FROM FactStateDailyEnergy fs ", " FROM FactStateDailyEnergy fs JOIN DimStates s ON fs.StateID = s.StateID ")
+            except Exception:
+                pass
 
             # Probe execution to get score
             try:
@@ -1356,8 +1383,9 @@ class EnhancedRAGService:
                 else:
                     table_hint_bonus -= 0.2
 
-            # Slight positive bias for wren_mdl if it executes correctly (to prefer MDL in prod)
+            # Slight positive bias for wren_mdl and explicit builder if they execute
             mdl_bias = 0.2 if (cand.get("source") == "wren_mdl" and execution.success) else 0.0
+            explicit_builder_bonus = 0.5 if (cand.get("source") == "explicit_builder" and execution.success) else 0.0
             # Penalize disallowed EnergyMet usage on non-energy models for wren_mdl
             disallowed_penalty = 0.0
             if cand.get("source") == "wren_mdl":
@@ -1367,7 +1395,7 @@ class EnhancedRAGService:
                 if 'energymet' in corrected.lower() and not ('allindiadailysummary' in ftable or 'statedailyenergy' in ftable):
                     disallowed_penalty -= 0.5
 
-            score = success_score + coverage_score + size_score + explicit_bonus + table_hint_bonus + mdl_bias + disallowed_penalty
+            score = success_score + coverage_score + size_score + explicit_bonus + table_hint_bonus + mdl_bias + explicit_builder_bonus + disallowed_penalty
 
             scored.append({
                 "source": cand.get("source"),
@@ -1383,6 +1411,56 @@ class EnhancedRAGService:
             if explicit_success:
                 return explicit_success
         return scored
+
+    def _build_explicit_table_sql(self, table_name: str, query: str) -> Optional[str]:
+        """Build a safe SELECT for explicitly mentioned tables using MDL hints."""
+        try:
+            import re
+            mdl = getattr(self, 'wren_ai_integration', None)
+            schema = getattr(mdl, 'mdl_schema', None)
+            node = schema.models.get(table_name) if (schema and schema.models) else None
+            hints = (node.definition or {}).get('hints', {}) if node else {}
+            pvals = hints.get('preferred_value_columns') or []
+            ptime = hints.get('preferred_time_column')
+            has_date_fk = hints.get('has_date_fk', False)
+            value_col = pvals[0] if pvals else None
+            if not value_col:
+                return None
+
+            ql = (query or '').lower()
+            is_monthly = any(k in ql for k in ["monthly", "per month", "by month"])
+            year_m = re.search(r"\b(19|20)\d{2}\b", ql)
+            year = year_m.group(0) if year_m else None
+
+            if is_monthly:
+                if has_date_fk:
+                    return (
+                        f"SELECT strftime('%Y-%m', d.ActualDate) AS Month, ROUND(SUM(fs.{value_col}), 2) AS Value "
+                        f"FROM {table_name} fs JOIN DimDates d ON fs.DateID = d.DateID "
+                        + (f"WHERE strftime('%Y', d.ActualDate) = '{year}' " if year else "")
+                        + "GROUP BY Month ORDER BY Month"
+                    )
+                elif ptime:
+                    return (
+                        f"SELECT strftime('%Y-%m', fs.{ptime}) AS Month, ROUND(SUM(fs.{value_col}), 2) AS Value "
+                        f"FROM {table_name} fs "
+                        + (f"WHERE strftime('%Y', fs.{ptime}) = '{year}' " if year else "")
+                        + "GROUP BY Month ORDER BY Month"
+                    )
+            else:
+                if has_date_fk:
+                    return (
+                        f"SELECT ROUND(SUM(fs.{value_col}), 2) AS Value FROM {table_name} fs JOIN DimDates d ON fs.DateID = d.DateID "
+                        + (f"WHERE strftime('%Y', d.ActualDate) = '{year}'" if year else "")
+                    )
+                elif ptime:
+                    return (
+                        f"SELECT ROUND(SUM(fs.{value_col}), 2) AS Value FROM {table_name} fs "
+                        + (f"WHERE strftime('%Y', fs.{ptime}) = '{year}'" if year else "")
+                    )
+            return None
+        except Exception:
+            return None
 
     def _build_keyword_summary(self, query: str, semantic_context: Dict[str, Any]) -> Dict[str, Any]:
         """Summarize extracted/available/missing keywords for observability."""

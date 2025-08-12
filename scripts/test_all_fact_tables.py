@@ -58,6 +58,22 @@ def build_test_cases() -> List[TestCase]:
         description="Outage columns detection and monthly grouping",
     ))
 
+    # Outage monthly - all regions central sector only
+    tests.append(TestCase(
+        case_id="FAIDS_all_regions_monthly_outage_central",
+        query="What is the monthly central sector outage of all regions in 2024?",
+        required_sql_parts=[
+            "from factallindiadailysummary",
+            "centralsectoroutage",
+            "join dimregions",
+            "join dimdates",
+            "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
+            "group by r.regionname",
+        ],
+        min_rows=0,
+        description="All regions central outage monthly",
+    ))
+
     # FactAllIndiaDailySummary - all regions monthly shortage (group by RegionName)
     tests.append(TestCase(
         case_id="FAIDS_all_regions_monthly_shortage",
@@ -99,6 +115,37 @@ def build_test_cases() -> List[TestCase]:
         ],
         min_rows=1,
         description="All states grouped with monthly",
+    ))
+
+    # FactStateDailyEnergy + DimRegions - states in a region monthly
+    tests.append(TestCase(
+        case_id="FSDE_states_in_region_monthly",
+        query="what is the monthly energy met of all states in southern region in 2025?",
+        required_sql_parts=[
+            "from factstatedailyenergy",
+            "join dimstates",
+            "join dimregions",
+            "join dimdates",
+            "r.regionname = 'southern region'",
+            "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
+            "group by s.statename",
+        ],
+        min_rows=0,
+        description="States filtered by region and grouped monthly",
+    ))
+
+    # FactDailyGenerationBreakdown - monthly generation by source
+    tests.append(TestCase(
+        case_id="FDGB_monthly_generation_by_source",
+        query="what is the monthly generation by source in 2025?",
+        required_sql_parts=[
+            "from factdailygenerationbreakdown",
+            "join dimdates",
+            "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
+            "group by dgs.sourcename",
+        ],
+        min_rows=0,
+        description="Generation by source monthly grouping",
     ))
 
     # FactDailyGenerationBreakdown - generation by source
