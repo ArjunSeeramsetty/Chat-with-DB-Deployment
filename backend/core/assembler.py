@@ -620,6 +620,27 @@ class SQLAssembler:
         # Look for template based on query type and intent
         fallback_template_key: Optional[str] = None
         template_key: Optional[str] = None  # Initialize template_key
+
+        # First: explicit table detection to force the correct template
+        try:
+            oq = (original_query or "").lower()
+            explicit_map = {
+                'factinternationaltransmissionlinkflow': 'international_transmission_query',
+                'facttransmissionlinkflow': 'transmission_query',
+                'facttimeblockpowerdata': 'time_block_query',
+                'facttimeblockgeneration': 'time_block_generation_query',
+                'factdailygenerationbreakdown': 'generation_query',
+                'factcountrydailyexchange': 'country_daily_exchange_query',
+                'facttransnationalexchangedetail': 'exchange_query',
+            }
+            for tname, tkey in explicit_map.items():
+                if tname in oq:
+                    template_key = tkey
+                    fallback_template_key = tkey
+                    logger.info(f"Explicit table detected in query; forcing template {tkey}")
+                    break
+        except Exception:
+            pass
         if analysis.query_type.value == "exchange_detail":
             fallback_template_key = "exchange_query"
         elif analysis.query_type.value == "exchange":

@@ -273,6 +273,10 @@ async def main():
         status = "PASS" if res["passed"] else "FAIL"
         cand = res.get("candidate") or "?"
         print(f"[{status}] {res['id']} ({res['duration_ms']} ms) rows={res['rows']} success={res['success']} candidate={cand}")
+        sql_out = (res.get('sql') or '').strip()
+        if sql_out:
+            print("SQL:")
+            print(sql_out)
 
     # Summary
     total = len(results)
@@ -294,10 +298,11 @@ async def main():
         print("\nFailures (details):")
         for r in failures:
             print(f"- {r['id']}: success={r['success']} required_ok={r['required_ok']} forbidden_ok={r['forbidden_ok']} row_ok={r['row_ok']} err={r['error']}")
-            # Print first 200 chars of SQL
+            # Print full SQL
             sql = (r.get('sql') or '')
             if sql:
-                print("  SQL:", sql[:200].replace('\n', ' '))
+                print("  SQL:")
+                print(sql)
 
 
 if __name__ == '__main__':

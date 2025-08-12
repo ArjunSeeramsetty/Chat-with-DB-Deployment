@@ -956,40 +956,46 @@ class EnhancedRAGService:
 
                 # Join to generation sources if possible
                 has_gs_join = ("GenerationSourceID" in fcols and "GenerationSourceID" in gs_cols)
-                gs_join = "JOIN DimGenerationSources gs ON fg.GenerationSourceID = gs.GenerationSourceID" if has_gs_join else ""
+                # Force alias to dgs for consistency with tests
+                dgs_join = "JOIN DimGenerationSources dgs ON fg.GenerationSourceID = dgs.GenerationSourceID" if has_gs_join else ""
+                # Prefer SourceName column when available
                 source_name_col = _find_any(gs_cols, "source", "name") if has_gs_join else None
-                category_col = _find_any(gs_cols, "category") if has_gs_join else None
 
                 where_parts: List[str] = []
-                if "renewable" in ql and category_col:
-                    where_parts.append(f"gs.{category_col} = 'Renewable'")
+                if "renewable" in ql:
+                    category_col = _find_any(gs_cols, "category") if has_gs_join else None
+                    if category_col:
+                        where_parts.append(f"dgs.{category_col} = 'Renewable'")
                 if date_filter:
                     where_parts.append(date_filter)
                 where_clause = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
 
                 if monthly and has_date_join:
-                    group_key = (source_name_col and f"gs.{source_name_col}") or (has_gs_join and "gs.GenerationSourceID") or "fg.GenerationSourceID"
+                    # Always expose dgs.SourceName for grouping when join exists; fallback to ID otherwise
+                    group_key = (has_gs_join and (source_name_col and "dgs." + source_name_col or "dgs.GenerationSourceID")) or "fg.GenerationSourceID"
+                    select_key = (has_gs_join and (source_name_col and "dgs." + source_name_col + " AS Source, " or "dgs.GenerationSourceID AS Source, ")) or ""
+                    group_clause = ("dgs." + source_name_col) if (has_gs_join and source_name_col) else "Source"
                     return (
                         "SELECT "
-                        + (group_key + " AS Source, " if group_key else "")
+                        + select_key
                         + "strftime('%Y-%m', d.ActualDate) AS Month, "
                         + f"ROUND(SUM(fg.{gen_col}), 2) AS TotalGeneration "
                         + f"FROM {fact} fg "
-                        + (gs_join + " ")
+                        + (dgs_join + " ")
                         + (date_join + " ")
                         + where_clause + " "
-                        + ("GROUP BY " + ("Source, " if group_key else "") + "Month ORDER BY " + ("Source, " if group_key else "") + "Month")
+                        + ("GROUP BY " + (group_clause + ", " if select_key else "") + "Month ORDER BY " + (group_clause + ", " if select_key else "") + "Month")
                     )
                 else:
-                    select_key = (source_name_col and f"gs.{source_name_col} AS Source, ") or (has_gs_join and "gs.GenerationSourceID AS Source, ") or ""
-                    group_key = ("Source, " if select_key else "")
+                    select_key = (has_gs_join and (source_name_col and "dgs." + source_name_col + " AS Source, " or "dgs.GenerationSourceID AS Source, ")) or ""
+                    group_key = ("Source" if select_key else "")
                     return (
                         "SELECT " + select_key + f"ROUND(SUM(fg.{gen_col}), 2) AS TotalGeneration "
                         + f"FROM {fact} fg "
-                        + (gs_join + " ")
+                        + (dgs_join + " ")
                         + (date_join + " ")
                         + where_clause + " "
-                        + ("GROUP BY " + group_key[:-2] if select_key else "")
+                        + ("GROUP BY " + group_key if select_key else "")
                     )
 
             # Outage detection and kind
@@ -1282,12 +1288,17 @@ class EnhancedRAGService:
         # Candidate 5: Explicit-table builder using MDL hints
         try:
             explicit_tables_str = (semantic_context or {}).get("semantic_mappings", {}).get("explicit_tables")
+            detected_tables: set = set()
             if explicit_tables_str:
-                explicit_tables = [t.strip() for t in explicit_tables_str.split(',') if t.strip()]
-                for tname in explicit_tables:
-                    sql = self._build_explicit_table_sql(tname, query)
-                    if sql:
-                        candidates.append({"source": "explicit_builder", "sql": sql})
+                detected_tables |= {t.strip() for t in explicit_tables_str.split(',') if t.strip()}
+            # Regex fallback: scan query text for table-like tokens starting with 'Fact'
+            import re as _re
+            for t in _re.findall(r"fact[a-zA-Z0-9_]+", (query or ''), flags=_re.IGNORECASE):
+                detected_tables.add(t)
+            for tname in detected_tables:
+                sql = self._build_explicit_table_sql(tname, query)
+                if sql:
+                    candidates.append({"source": "explicit_builder", "sql": sql})
         except Exception as e:
             logger.warning(f"Explicit-table builder failed: {e}")
 
@@ -1306,7 +1317,7 @@ class EnhancedRAGService:
         Prefers candidates that use explicitly mentioned table names in the question/semantic mappings.
         """
         scored: List[Dict[str, Any]] = []
-        # Detect explicit tables from semantic context (Wren MDL mapping)
+        # Detect explicit tables from semantic context (Wren MDL mapping) or directly from the query text
         explicit_tables: set = set()
         try:
             explicit_tables_str = (semantic_context or {}).get("semantic_mappings", {}).get("explicit_tables")
@@ -1314,6 +1325,17 @@ class EnhancedRAGService:
                 explicit_tables = {t.strip().lower() for t in explicit_tables_str.split(",") if t.strip()}
         except Exception:
             explicit_tables = set()
+        if not explicit_tables:
+            try:
+                ql_detect = (query or "").lower()
+                mdl = getattr(self, 'wren_ai_integration', None)
+                schema = getattr(mdl, 'mdl_schema', None)
+                model_names = list(schema.models.keys()) if (schema and getattr(schema, 'models', None)) else []
+                for tname in model_names:
+                    if tname and tname.lower() in ql_detect:
+                        explicit_tables.add(tname.lower())
+            except Exception:
+                pass
         for cand in candidates:
             raw_sql = cand.get("sql") or ""
             # Auto-repair and MDL/business-rule correction
@@ -1363,7 +1385,7 @@ class EnhancedRAGService:
                 if any((t in lower_sql) for t in explicit_tables):
                     explicit_bonus += 3.0
                 else:
-                    explicit_bonus -= 0.5
+                    explicit_bonus -= 1.5
 
             # Prefer fact tables matched by domain intent words
             table_hint_bonus = 0.0
@@ -1383,9 +1405,9 @@ class EnhancedRAGService:
                 else:
                     table_hint_bonus -= 0.2
 
-            # Slight positive bias for wren_mdl and explicit builder if they execute
-            mdl_bias = 0.2 if (cand.get("source") == "wren_mdl" and execution.success) else 0.0
-            explicit_builder_bonus = 0.5 if (cand.get("source") == "explicit_builder" and execution.success) else 0.0
+            # Bias: Prefer wren_mdl strongly; de-emphasize explicit_builder
+            mdl_bias = 0.6 if (cand.get("source") == "wren_mdl" and execution.success) else 0.0
+            explicit_builder_bonus = 0.1 if (cand.get("source") == "explicit_builder" and execution.success) else 0.0
             # Penalize disallowed EnergyMet usage on non-energy models for wren_mdl
             disallowed_penalty = 0.0
             if cand.get("source") == "wren_mdl":
@@ -1409,6 +1431,8 @@ class EnhancedRAGService:
         if explicit_tables:
             explicit_success = [c for c in scored if c.get("explicit_match") and getattr(c.get("execution"), 'success', False)]
             if explicit_success:
+                # Prefer wren_mdl among explicit matches
+                explicit_success.sort(key=lambda c: 0 if c.get("source") == "wren_mdl" else (1 if c.get("source") == "assembler" else 2))
                 return explicit_success
         return scored
 
@@ -1424,6 +1448,14 @@ class EnhancedRAGService:
             ptime = hints.get('preferred_time_column')
             has_date_fk = hints.get('has_date_fk', False)
             value_col = pvals[0] if pvals else None
+            # Fallback: ask Wren MDL synthesizer to build correct SQL when hints are incomplete
+            if not value_col and mdl and hasattr(mdl, '_synthesize_sql_for_table'):
+                try:
+                    synth = mdl._synthesize_sql_for_table(table_name, query)
+                    if synth:
+                        return synth
+                except Exception:
+                    pass
             if not value_col:
                 return None
 
