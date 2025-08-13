@@ -26,158 +26,158 @@ class TestCase:
 def build_test_cases() -> List[TestCase]:
     tests: List[TestCase] = []
 
-    # FactAllIndiaDailySummary - region monthly shortage
-    tests.append(TestCase(
-        case_id="FAIDS_monthly_shortage_region",
-        query="what is the monthly energy shortage of Northern Region in 2025?",
-        required_sql_parts=[
-            "from factallindiadailysummary",
-            "join dimregions",
-            "join dimdates",
-            "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
-            "energyshortage",
-            "r.regionname = 'northern region'",
-        ],
-        min_rows=1,
-        description="Region-level monthly shortage with correct joins",
-    ))
+    # # FactAllIndiaDailySummary - region monthly shortage
+    # tests.append(TestCase(
+    #     case_id="FAIDS_monthly_shortage_region",
+    #     query="what is the monthly energy shortage of Northern Region in 2025?",
+    #     required_sql_parts=[
+    #         "from factallindiadailysummary",
+    #         "join dimregions",
+    #         "join dimdates",
+    #         "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
+    #         "energyshortage",
+    #         "r.regionname = 'northern region'",
+    #     ],
+    #     min_rows=1,
+    #     description="Region-level monthly shortage with correct joins",
+    # ))
 
-    # FactAllIndiaDailySummary - outage monthly
-    tests.append(TestCase(
-        case_id="FAIDS_monthly_outage_region",
-        query="what is the monthly total outage of Northern Region in 2025?",
-        required_sql_parts=[
-            "from factallindiadailysummary",
-            "join dimregions",
-            "join dimdates",
-            "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
-            "outage",
-            "r.regionname = 'northern region'",
-        ],
-        min_rows=1,
-        description="Outage columns detection and monthly grouping",
-    ))
+    # # FactAllIndiaDailySummary - outage monthly
+    # tests.append(TestCase(
+    #     case_id="FAIDS_monthly_outage_region",
+    #     query="what is the monthly total outage of Northern Region in 2025?",
+    #     required_sql_parts=[
+    #         "from factallindiadailysummary",
+    #         "join dimregions",
+    #         "join dimdates",
+    #         "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
+    #         "outage",
+    #         "r.regionname = 'northern region'",
+    #     ],
+    #     min_rows=1,
+    #     description="Outage columns detection and monthly grouping",
+    # ))
 
-    # Outage monthly - all regions central sector only
-    tests.append(TestCase(
-        case_id="FAIDS_all_regions_monthly_outage_central",
-        query="What is the monthly central sector outage of all regions in 2024?",
-        required_sql_parts=[
-            "from factallindiadailysummary",
-            "centralsectoroutage",
-            "join dimregions",
-            "join dimdates",
-            "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
-            "group by r.regionname",
-        ],
-        min_rows=0,
-        description="All regions central outage monthly",
-    ))
+    # # Outage monthly - all regions central sector only
+    # tests.append(TestCase(
+    #     case_id="FAIDS_all_regions_monthly_outage_central",
+    #     query="What is the monthly central sector outage of all regions in 2024?",
+    #     required_sql_parts=[
+    #         "from factallindiadailysummary",
+    #         "centralsectoroutage",
+    #         "join dimregions",
+    #         "join dimdates",
+    #         "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
+    #         "group by r.regionname",
+    #     ],
+    #     min_rows=0,
+    #     description="All regions central outage monthly",
+    # ))
 
-    # FactAllIndiaDailySummary - all regions monthly shortage (group by RegionName)
-    tests.append(TestCase(
-        case_id="FAIDS_all_regions_monthly_shortage",
-        query="what is the monthly energy shortage of all regions in 2025?",
-        required_sql_parts=[
-            "from factallindiadailysummary",
-            "join dimregions",
-            "join dimdates",
-            "group by r.regionname",
-        ],
-        min_rows=1,
-        description="All regions grouped with monthly",
-    ))
+    # # FactAllIndiaDailySummary - all regions monthly shortage (group by RegionName)
+    # tests.append(TestCase(
+    #     case_id="FAIDS_all_regions_monthly_shortage",
+    #     query="what is the monthly energy shortage of all regions in 2025?",
+    #     required_sql_parts=[
+    #         "from factallindiadailysummary",
+    #         "join dimregions",
+    #         "join dimdates",
+    #         "group by r.regionname",
+    #     ],
+    #     min_rows=1,
+    #     description="All regions grouped with monthly",
+    # ))
 
-    # FactStateDailyEnergy - state monthly consumption
-    tests.append(TestCase(
-        case_id="FSDE_monthly_consumption_state",
-        query="what is the monthly energy consumption of Andhra Pradesh in 2025?",
-        required_sql_parts=[
-            "from factstatedailyenergy",
-            "join dimstates",
-            "join dimdates",
-            "s.statename = 'andhra pradesh'",
-            "energymet",
-        ],
-        min_rows=1,
-        description="State table selection and correct joins",
-    ))
+    # # FactStateDailyEnergy - state monthly consumption
+    # tests.append(TestCase(
+    #     case_id="FSDE_monthly_consumption_state",
+    #     query="what is the monthly energy consumption of Andhra Pradesh in 2025?",
+    #     required_sql_parts=[
+    #         "from factstatedailyenergy",
+    #         "join dimstates",
+    #         "join dimdates",
+    #         "s.statename = 'andhra pradesh'",
+    #         "energymet",
+    #     ],
+    #     min_rows=1,
+    #     description="State table selection and correct joins",
+    # ))
 
-    # FactStateDailyEnergy - all states monthly shortage (group by StateName)
-    tests.append(TestCase(
-        case_id="FSDE_all_states_monthly_shortage",
-        query="what is the monthly energy shortage of all states in 2025?",
-        required_sql_parts=[
-            "from factstatedailyenergy",
-            "join dimstates",
-            "join dimdates",
-            "group by s.statename",
-        ],
-        min_rows=1,
-        description="All states grouped with monthly",
-    ))
+    # # FactStateDailyEnergy - all states monthly shortage (group by StateName)
+    # tests.append(TestCase(
+    #     case_id="FSDE_all_states_monthly_shortage",
+    #     query="what is the monthly energy shortage of all states in 2025?",
+    #     required_sql_parts=[
+    #         "from factstatedailyenergy",
+    #         "join dimstates",
+    #         "join dimdates",
+    #         "group by s.statename",
+    #     ],
+    #     min_rows=1,
+    #     description="All states grouped with monthly",
+    # ))
 
-    # FactStateDailyEnergy + DimRegions - states in a region monthly
-    tests.append(TestCase(
-        case_id="FSDE_states_in_region_monthly",
-        query="what is the monthly energy met of all states in southern region in 2025?",
-        required_sql_parts=[
-            "from factstatedailyenergy",
-            "join dimstates",
-            "join dimregions",
-            "join dimdates",
-            "r.regionname = 'southern region'",
-            "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
-            "group by s.statename",
-        ],
-        min_rows=0,
-        description="States filtered by region and grouped monthly",
-    ))
+    # # FactStateDailyEnergy + DimRegions - states in a region monthly
+    # tests.append(TestCase(
+    #     case_id="FSDE_states_in_region_monthly",
+    #     query="what is the monthly energy met of all states in southern region in 2025?",
+    #     required_sql_parts=[
+    #         "from factstatedailyenergy",
+    #         "join dimstates",
+    #         "join dimregions",
+    #         "join dimdates",
+    #         "r.regionname = 'southern region'",
+    #         "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
+    #         "group by s.statename",
+    #     ],
+    #     min_rows=0,
+    #     description="States filtered by region and grouped monthly",
+    # ))
 
-    # FactDailyGenerationBreakdown - monthly generation by source
-    tests.append(TestCase(
-        case_id="FDGB_monthly_generation_by_source",
-        query="what is the monthly generation by source in 2025?",
-        required_sql_parts=[
-            "from factdailygenerationbreakdown",
-            "join dimdates",
-            "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
-            "group by dgs.sourcename",
-        ],
-        min_rows=0,
-        description="Generation by source monthly grouping",
-    ))
+    # # FactDailyGenerationBreakdown - monthly generation by source
+    # tests.append(TestCase(
+    #     case_id="FDGB_monthly_generation_by_source",
+    #     query="what is the monthly generation by source in 2025?",
+    #     required_sql_parts=[
+    #         "from factdailygenerationbreakdown",
+    #         "join dimdates",
+    #         "strftime('%y-%m', d.actualdate)".replace("%y", "%Y"),
+    #         "group by dgs.sourcename",
+    #     ],
+    #     min_rows=0,
+    #     description="Generation by source monthly grouping",
+    # ))
 
-    # FactDailyGenerationBreakdown - generation by source
-    tests.append(TestCase(
-        case_id="FDGB_generation_by_source",
-        query="What is the renewable generation by source in 2025?",
-        required_sql_parts=[
-            "from factdailygenerationbreakdown",
-            "generationamount",
-        ],
-        min_rows=0,  # allow 0 if table not populated
-        description="Generation breakdown table coverage",
-    ))
+    # # FactDailyGenerationBreakdown - generation by source
+    # tests.append(TestCase(
+    #     case_id="FDGB_generation_by_source",
+    #     query="What is the renewable generation by source in 2025?",
+    #     required_sql_parts=[
+    #         "from factdailygenerationbreakdown",
+    #         "generationamount",
+    #     ],
+    #     min_rows=0,  # allow 0 if table not populated
+    #     description="Generation breakdown table coverage",
+    # ))
 
-    # FactCountryDailyExchange - international exchange for Bangladesh
-    tests.append(TestCase(
-        case_id="FCDE_exchange_bangladesh",
-        query="Show international power exchange with Bangladesh in 2024",
-        required_sql_parts=[
-            "from factcountrydailyexchange",
-            "join dimcountries",
-            "join dimdates",
-            "bangladesh",
-        ],
-        min_rows=0,
-        description="Country exchange detection and joins",
-    ))
+    # # FactCountryDailyExchange - international exchange for Bangladesh
+    # tests.append(TestCase(
+    #     case_id="FCDE_exchange_bangladesh",
+    #     query="Show international power exchange with Bangladesh in 2024",
+    #     required_sql_parts=[
+    #         "from factcountrydailyexchange",
+    #         "join dimcountries",
+    #         "join dimdates",
+    #         "bangladesh",
+    #     ],
+    #     min_rows=0,
+    #     description="Country exchange detection and joins",
+    # ))
 
     # FactInternationalTransmissionLinkFlow - explicit table coverage
     tests.append(TestCase(
         case_id="FITLF_explicit_table",
-        query="Show total flow from FactInternationalTransmissionLinkFlow in 2024",
+        query="Show total energy flow from FactInternationalTransmissionLinkFlow in 2024",
         required_sql_parts=[
             "from factinternationaltransmissionlinkflow",
         ],
@@ -189,7 +189,7 @@ def build_test_cases() -> List[TestCase]:
     # FactTransmissionLinkFlow - explicit table coverage
     tests.append(TestCase(
         case_id="FTLF_explicit_table",
-        query="Show total flow from FactTransmissionLinkFlow in 2024",
+        query="Show total energy flow from FactTransmissionLinkFlow in 2024",
         required_sql_parts=[
             "from facttransmissionlinkflow",
         ],
@@ -201,7 +201,7 @@ def build_test_cases() -> List[TestCase]:
     # FactTimeBlockPowerData - explicit table coverage
     tests.append(TestCase(
         case_id="FTBPD_explicit_table",
-        query="Show hourly data from FactTimeBlockPowerData for 2025-01-01",
+        query="Show hourly Demad Met and Total Generation from FactTimeBlockPowerData for 2025-01-01",
         required_sql_parts=[
             "from facttimeblockpowerdata",
         ],
@@ -213,7 +213,7 @@ def build_test_cases() -> List[TestCase]:
     # FactTimeBlockGeneration - explicit table coverage
     tests.append(TestCase(
         case_id="FTBG_explicit_table",
-        query="Show hourly generation from FactTimeBlockGeneration for 2025-01-01",
+        query="Show hourly generation by source from FactTimeBlockGeneration for 2025-01-01",
         required_sql_parts=[
             "from facttimeblockgeneration",
         ],

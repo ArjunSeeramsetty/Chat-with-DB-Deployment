@@ -1392,8 +1392,8 @@ class WrenAIIntegration:
                             # Fallback minimal COUNT(*) to satisfy execution when hints unavailable
                             synth = f"SELECT COUNT(*) AS Value FROM {target_table}"
                         return synth
-                # Transmission link flow
-                if any(k in ql for k in ['transmission', 'link flow', 'link-flow', 'interregional flow', 'inter-regional flow', 'flow']):
+                # Transmission link flow / energy flow
+                if any(k in ql for k in ['transmission', 'link flow', 'link-flow', 'interregional flow', 'inter-regional flow', 'flow', 'energy flow']):
                     # International if country present or 'international' keyword
                     intl = ('international' in ql) or any(c in ql for c in ['bangladesh', 'nepal', 'bhutan', 'sri lanka', 'china', 'myanmar', 'pakistan'])
                     target_table = 'FactInternationalTransmissionLinkFlow' if intl else 'FactTransmissionLinkFlow'

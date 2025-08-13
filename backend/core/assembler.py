@@ -72,7 +72,7 @@ class SQLAssembler:
             "transmission_query": """
                 SELECT dtl.LineIdentifier, ROUND({aggregation_function}(ftl.{energy_column}), 2) as {column_alias}
                 FROM FactTransmissionLinkFlow ftl
-                JOIN DimTransmissionLinks dtl ON ftl.LineID = dtl.LineID
+                JOIN DimTransmissionLines dtl ON ftl.LineID = dtl.LineID
                 JOIN DimDates dt ON ftl.DateID = dt.DateID
                 {where_clause}
                 GROUP BY dtl.LineIdentifier
@@ -118,11 +118,12 @@ class SQLAssembler:
                 ORDER BY {column_alias} DESC
             """,
             "time_block_query": """
-                SELECT ROUND({aggregation_function}(ftb.{energy_column}), 2) as {column_alias}
+                SELECT ftb.BlockTime, ftb.BlockNumber, ROUND({aggregation_function}(ftb.{energy_column}), 2) as {column_alias}
                 FROM FactTimeBlockPowerData ftb
                 JOIN DimDates dt ON ftb.DateID = dt.DateID
                 {where_clause}
-                ORDER BY {column_alias} DESC
+                GROUP BY ftb.BlockTime, ftb.BlockNumber
+                ORDER BY ftb.BlockTime
             """,
             "time_block_generation_query": """
                 SELECT dgs.SourceName, ftbg.BlockNumber, ROUND(SUM(ftbg.GenerationOutput), 2) as TotalGeneration
@@ -663,9 +664,17 @@ class SQLAssembler:
                 fallback_template_key = "international_transmission_query"
             else:
                 fallback_template_key = "transmission_query"
+        elif analysis.query_type.value == "international_transmission":
+            fallback_template_key = "international_transmission_query"
         elif analysis.query_type.value == "generation":
             # Check if this is a region-level generation query
             original_query_lower = original_query.lower() if original_query else ""
+            # If sub-daily terms present, redirect to time-block generation template path
+            if any(k in original_query_lower for k in ["time block", "time-block", "hourly", "15 min", "15-minute", "intraday"]):
+                fallback_template_key = "time_block_generation_query"
+                template_key = fallback_template_key
+                logger.info("Sub-daily granularity detected; using time_block_generation_query template")
+                
             if any(
                 word in original_query_lower
                 for word in ["region", "regions", "all regions"]
@@ -767,16 +776,19 @@ class SQLAssembler:
                 template_key = "region_query"  # Default
 
         logger.info(
-            f"Looking for template: {template_key}, Intent: {analysis.intent.value}, Keywords: {analysis.detected_keywords}"
+            f"Looking for template: {template_key or fallback_template_key}, Intent: {analysis.intent.value}, Keywords: {analysis.detected_keywords}"
         )
         logger.info(
-            f"Query type: {analysis.query_type.value}, Template key: {template_key}"
+            f"Query type: {analysis.query_type.value}, Template key: {template_key or fallback_template_key}"
         )
         logger.info(f"Available templates: {list(self.sql_templates.keys())}")
         logger.info(
-            f"🔍 TEMPLATE SELECTION: query_type={analysis.query_type.value}, template_key={template_key}"
+            f"🔍 TEMPLATE SELECTION: query_type={analysis.query_type.value}, template_key={template_key or fallback_template_key}"
         )
 
+        # If no explicit template chosen, fall back to the fallback key
+        if not template_key:
+            template_key = fallback_template_key
 
         if template_key in self.sql_templates:
             logger.info(f"✅ Template found: {template_key}")
@@ -860,11 +872,20 @@ class SQLAssembler:
                 ):
                     aggregation_function = "AVG"
 
-                energy_column = (
-                    "MaxLoading"
-                    if "loading" in analysis.detected_keywords
-                    else "MaxLoading"
-                )
+                # Column: use schema linker for appropriate measure (MaxLoading/AvgLoading/EnergyExchanged)
+                if context.schema_linker:
+                    # Prefer 'transmission' or 'exchange' semantic depending on keywords
+                    qt = "transmission"
+                    if any(k in analysis.detected_keywords for k in ["exchange", "import", "export"]):
+                        qt = "exchange"
+                    energy_column = context.schema_linker.get_best_column_match(
+                        analysis.original_query or original_query or "",
+                        "FactInternationalTransmissionLinkFlow",
+                        query_type=qt,
+                        llm_provider=context.llm_provider,
+                    )
+                else:
+                    energy_column = "MaxLoading"
                 column_alias = (
                     f"Maximum{energy_column}"
                     if aggregation_function == "MAX"
@@ -905,15 +926,16 @@ class SQLAssembler:
                 ):
                     aggregation_function = "AVG"
 
-                energy_column = (
-                    "MaxImport"
-                    if "import" in analysis.detected_keywords
-                    else (
-                        "MaxExport"
-                        if "export" in analysis.detected_keywords
-                        else "MaxImport"
+                # Column via schema linker: MaxImport/MaxExport/ImportEnergy/ExportEnergy/NetImportEnergy
+                if context.schema_linker:
+                    energy_column = context.schema_linker.get_best_column_match(
+                        analysis.original_query or original_query or "",
+                        "FactTransmissionLinkFlow",
+                        query_type="transmission",
+                        llm_provider=context.llm_provider,
                     )
-                )
+                else:
+                    energy_column = "MaxImport"
                 column_alias = (
                     f"Maximum{energy_column}"
                     if aggregation_function == "MAX"
@@ -943,11 +965,16 @@ class SQLAssembler:
                     or "max" in analysis.detected_keywords
                     else "SUM"
                 )
-                energy_column = (
-                    "TotalGeneration"
-                    if "generation" in analysis.detected_keywords
-                    else "DemandMet"
-                )
+                # Column via schema linker: DemandMet, NetDemandMet, TotalGeneration, NetTransnationalExchange
+                if context.schema_linker:
+                    energy_column = context.schema_linker.get_best_column_match(
+                        analysis.original_query or original_query or "",
+                        "FactTimeBlockPowerData",
+                        query_type="power",
+                        llm_provider=context.llm_provider,
+                    )
+                else:
+                    energy_column = "DemandMet"
                 column_alias = (
                     f"Maximum{energy_column}"
                     if aggregation_function == "MAX"
@@ -1643,7 +1670,7 @@ class SQLAssembler:
                 logger.warning(f"No schema linker available, cannot determine column")
                 return None
 
-        logger.warning(f"No template found for key: {fallback_template_key}")
+        logger.warning(f"No template found for key: {template_key or fallback_template_key}")
         return None
 
     def _generate_with_llm(self, prompt: str) -> Optional[str]:

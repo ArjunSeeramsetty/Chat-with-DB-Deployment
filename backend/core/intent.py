@@ -42,9 +42,13 @@ class IntentAnalyzer:
                 "flow",
                 "import",
                 "export",
+                "loading",
+                "link",
+                "corridor",
+                "domestic",
             ],
-            QueryType.EXCHANGE: ["exchange", "country", "international"],
-            QueryType.TIME_BLOCK: ["time block", "hourly", "daily", "monthly"],
+            QueryType.EXCHANGE: ["exchange", "country", "international", "cross border", "cross-border"],
+            QueryType.TIME_BLOCK: ["time block", "time-block", "hourly", "15 min", "15-minute", "intraday"],
         }
 
         # Intent type keywords
@@ -108,6 +112,21 @@ class IntentAnalyzer:
         Detect the query type based on keywords and entities.
         """
         query_lower = query.lower()
+
+        # Force time-block tables for sub-daily granularity
+        timeblock_terms = ["time block", "time-block", "hourly", "15 min", "15-minute", "intraday"]
+        if any(t in query_lower for t in timeblock_terms):
+            # Choose generation variant only when explicitly asking by source or mentioning source categories
+            if any(k in query_lower for k in ["by source", "source", "sources"]):
+                return QueryType.TIME_BLOCK_GENERATION
+            return QueryType.TIME_BLOCK
+
+        # Force transmission/international link flow
+        if ("flow" in query_lower or "link flow" in query_lower or "linkflow" in query_lower):
+            if ("international" in query_lower) or any(c in query_lower for c in ["bangladesh","nepal","bhutan","myanmar"]):
+                return QueryType.INTERNATIONAL_TRANSMISSION
+            if "transmission" in query_lower or "link" in query_lower:
+                return QueryType.TRANSMISSION
 
         # Check for outage keywords - these should use region-level data
         outage_keywords = [
@@ -574,6 +593,16 @@ Return ONLY the JSON object, no explanations or code:"""
         elif "export" in query_lower:
             entities.append("export")
 
+        # Transmission-specific and time-block entities
+        transmission_terms = ["transmission", "line", "flow", "import", "export", "loading", "corridor", "link"]
+        timeblock_terms = ["time block", "time-block", "hourly", "15 min", "15-minute", "intraday"]
+        for t in transmission_terms:
+            if t in query_lower and t not in entities:
+                entities.append(t)
+        for t in timeblock_terms:
+            if t in query_lower and t not in entities:
+                entities.append(t)
+
         # Extract regions using centralized entity loader with alias support (e.g., "north")
         # First try direct matches from configured regions
         indian_regions = self.entity_loader.get_indian_regions()
@@ -718,6 +747,11 @@ Return ONLY the JSON object, no explanations or code:"""
             if keyword in query_lower:
                 detected_keywords.append(keyword)
 
+        # Add domain-specific routing keywords for later stages
+        for k in ["time block","time-block","hourly","15 min","15-minute","intraday","link flow","linkflow","flow","transmission","international","energy flow"]:
+            if k in query_lower:
+                detected_keywords.append(k)
+
         return detected_keywords
 
     def _get_main_table(self, query_type: QueryType) -> str:
@@ -726,7 +760,8 @@ Return ONLY the JSON object, no explanations or code:"""
             QueryType.STATE: "FactStateDailyEnergy",
             QueryType.REGION: "FactAllIndiaDailySummary",
             QueryType.GENERATION: "FactDailyGenerationBreakdown",
-            QueryType.TRANSMISSION: "FactTransmissionLinkFlow",  # Default for regular transmission
+            QueryType.TRANSMISSION: "FactTransmissionLinkFlow",
+            QueryType.INTERNATIONAL_TRANSMISSION: "FactInternationalTransmissionLinkFlow",
             QueryType.EXCHANGE: "FactCountryDailyExchange",
             QueryType.EXCHANGE_DETAIL: "FactTransnationalExchangeDetail",
             QueryType.TIME_BLOCK: "FactTimeBlockPowerData",
@@ -757,6 +792,7 @@ Return ONLY the JSON object, no explanations or code:"""
             QueryType.STATE: "DimStates",
             QueryType.GENERATION: "DimGenerationSources",
             QueryType.TRANSMISSION: "DimTransmissionLines",
+            QueryType.INTERNATIONAL_TRANSMISSION: "DimTransmissionLines",
             QueryType.EXCHANGE: "DimCountries",
             QueryType.TIME_BLOCK: "DimTimeBlocks",
             QueryType.TIME_BLOCK_GENERATION: "DimGenerationSources",
@@ -770,6 +806,7 @@ Return ONLY the JSON object, no explanations or code:"""
             QueryType.STATE: "StateID",
             QueryType.GENERATION: "GenerationSourceID",
             QueryType.TRANSMISSION: "LineID",  # Fixed: actual column name
+            QueryType.INTERNATIONAL_TRANSMISSION: "LineID",
             QueryType.EXCHANGE: "CountryID",
             QueryType.TIME_BLOCK: "TimeBlockID",
             QueryType.TIME_BLOCK_GENERATION: "GenerationSourceID",
@@ -783,6 +820,7 @@ Return ONLY the JSON object, no explanations or code:"""
             QueryType.STATE: "StateName",
             QueryType.GENERATION: "SourceName",
             QueryType.TRANSMISSION: "LineIdentifier",  # Fixed: actual column name
+            QueryType.INTERNATIONAL_TRANSMISSION: "LineIdentifier",
             QueryType.EXCHANGE: "CountryName",
             QueryType.TIME_BLOCK: "TimeBlockName",
             QueryType.TIME_BLOCK_GENERATION: "SourceName",

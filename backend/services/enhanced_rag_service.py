@@ -370,6 +370,23 @@ class EnhancedRAGService:
         try:
             import re
             repaired = sql or ""
+
+            # Short-circuit: if SQL already targets specialized non-energy fact tables, preserve it.
+            # Avoid rewriting to FactAllIndiaDailySummary/FactStateDailyEnergy.
+            try:
+                m_ft = re.search(r"FROM\s+(\w+)\s+[a-zA-Z]\\w*", repaired, re.IGNORECASE)
+                fact_used = (m_ft.group(1) if m_ft else None) or ""
+                keep_tables = {
+                    "FactTransmissionLinkFlow",
+                    "FactInternationalTransmissionLinkFlow",
+                    "FactTimeBlockPowerData",
+                    "FactTimeBlockGeneration",
+                    "FactDailyGenerationBreakdown",
+                }
+                if fact_used in keep_tables:
+                    return repaired.strip()
+            except Exception:
+                pass
             if not repaired.strip():
                 # Build minimal query if user referenced explicit table name
                 ql = (query or "").lower()
@@ -1266,10 +1283,40 @@ class EnhancedRAGService:
             intent_analyzer = IntentAnalyzer()
             analysis = await intent_analyzer.analyze_intent(query, self.llm_provider)
             
-            # Create context with proper analysis
+            # Create context with proper analysis and schema linker
+            from backend.core.schema_linker import SchemaLinker
+            schema_map = {}
+            try:
+                from backend.core.sql_executor import SQLExecutor  # optional
+                executor = SQLExecutor(self.db_path)
+                schema_map = executor.get_schema_info()  # {table: [columns]}
+            except Exception as e:
+                logger.warning(f"SQLExecutor unavailable, using lightweight schema introspection: {e}")
+                # Lightweight schema introspection from SQLite
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(self.db_path)
+                    cur = conn.cursor()
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                    tables = [row[0] for row in cur.fetchall()]
+                    for tname in tables:
+                        try:
+                            cur.execute(f"PRAGMA table_info({tname})")
+                            cols = [r[1] for r in cur.fetchall()]
+                            schema_map[tname] = cols
+                        except Exception:
+                            schema_map[tname] = []
+                    conn.close()
+                except Exception as e2:
+                    logger.error(f"Lightweight schema introspection failed: {e2}")
             context = ContextInfo(
-                query_analysis=analysis, schema_info=SchemaInfo(tables={}), dimension_values={}, user_mappings=[],
-                memory_context=None, schema_linker=None, llm_provider=self.llm_provider,
+                query_analysis=analysis,
+                schema_info=SchemaInfo(tables=schema_map or {}),
+                dimension_values={},
+                user_mappings=[],
+                memory_context=None,
+                schema_linker=SchemaLinker(schema_map or {}, self.db_path, self.llm_provider),
+                llm_provider=self.llm_provider,
             )
             sql_result = self.sql_assembler.generate_sql(query, analysis, context)
             if sql_result and hasattr(sql_result, 'sql') and sql_result.sql:
@@ -1302,6 +1349,31 @@ class EnhancedRAGService:
         except Exception as e:
             logger.warning(f"Explicit-table builder failed: {e}")
 
+        # Candidate 6: Domain-enforced synthesis for known patterns (time-block and link flow)
+        try:
+            ql = (query or '').lower()
+            # Sub-daily → time-block
+            if any(k in ql for k in ["time block", "time-block", "hourly", "15 min", "15-minute", "intraday"]):
+                target = "FactTimeBlockGeneration" if any(k in ql for k in ["by source", "source", "generation"]) else "FactTimeBlockPowerData"
+                if hasattr(self.wren_ai_integration, '_synthesize_sql_for_table'):
+                    synth = self.wren_ai_integration._synthesize_sql_for_table(target, query)
+                    if synth:
+                        candidates.append({"source": "domain_enforced", "sql": synth})
+            # International link flow
+            if ("flow" in ql or "link flow" in ql or "linkflow" in ql) and (("international" in ql) or any(c in ql for c in ["bangladesh","nepal","bhutan","myanmar", "sri lanka", "sri-lanka", "pakistan", "china"])):
+                if hasattr(self.wren_ai_integration, '_synthesize_sql_for_table'):
+                    synth = self.wren_ai_integration._synthesize_sql_for_table("FactInternationalTransmissionLinkFlow", query)
+                    if synth:
+                        candidates.append({"source": "domain_enforced", "sql": synth})
+            # Domestic transmission link flow
+            if ("flow" in ql or "link flow" in ql or "linkflow" in ql) and ("transmission" in ql or "link" in ql):
+                if hasattr(self.wren_ai_integration, '_synthesize_sql_for_table'):
+                    synth = self.wren_ai_integration._synthesize_sql_for_table("FactTransmissionLinkFlow", query)
+                    if synth:
+                        candidates.append({"source": "domain_enforced", "sql": synth})
+        except Exception as e:
+            logger.warning(f"Domain-enforced synthesis failed: {e}")
+
         # Deduplicate by normalized SQL
         seen = set()
         unique: List[Dict[str, Any]] = []
@@ -1317,7 +1389,7 @@ class EnhancedRAGService:
         Prefers candidates that use explicitly mentioned table names in the question/semantic mappings.
         """
         scored: List[Dict[str, Any]] = []
-        # Detect explicit tables from semantic context (Wren MDL mapping) or directly from the query text
+        # Detect explicit tables from semantic context (Wren MDL mapping)
         explicit_tables: set = set()
         try:
             explicit_tables_str = (semantic_context or {}).get("semantic_mappings", {}).get("explicit_tables")
@@ -1336,12 +1408,72 @@ class EnhancedRAGService:
                         explicit_tables.add(tname.lower())
             except Exception:
                 pass
+        # Regex fallback: pick any token starting with 'fact'
+        if not explicit_tables:
+            try:
+                import re as _re
+                for t in _re.findall(r"fact[a-zA-Z0-9_]+", (query or ''), flags=_re.IGNORECASE):
+                    explicit_tables.add(t.lower())
+            except Exception:
+                pass
+
+        # Detect sub-daily intent
+        ql_global = (query or "").lower()
+        is_sub_daily = any(k in ql_global for k in ["time block", "time-block", "hourly", "15 min", "15-minute", "intraday"])
+
         for cand in candidates:
             raw_sql = cand.get("sql") or ""
             # Auto-repair and MDL/business-rule correction
             repaired = self._auto_repair_sql(raw_sql)
+            # If sub-daily, force-correct to time-block models when candidate uses daily models
+            if is_sub_daily:
+                lower_rs = repaired.lower()
+                if ("factallindiadailysummary" in lower_rs) or ("factstatedailyenergy" in lower_rs) or ("factdailygenerationbreakdown" in lower_rs):
+                    # Prefer power vs generation variant
+                    target = "FactTimeBlockGeneration" if any(k in ql_global for k in ["by source", "source", "generation"]) else "FactTimeBlockPowerData"
+                    synth = self.wren_ai_integration._synthesize_sql_for_table(target, query) if hasattr(self.wren_ai_integration, '_synthesize_sql_for_table') else None
+                    if synth:
+                        repaired = synth
+            else:
+                # Transmission / International link flow enforcement
+                lrq = ql_global
+                lower_rs = repaired.lower()
+                wants_flow = ("flow" in lrq) or ("link flow" in lrq) or ("linkflow" in lrq)
+                if wants_flow and ("international" in lrq or any(c in lrq for c in ["bangladesh","nepal","bhutan","myanmar"])):
+                    if "factinternationaltransmissionlinkflow" not in lower_rs and hasattr(self.wren_ai_integration, '_synthesize_sql_for_table'):
+                        synth = self.wren_ai_integration._synthesize_sql_for_table("FactInternationalTransmissionLinkFlow", query)
+                        if synth:
+                            repaired = synth
+                elif wants_flow and ("transmission" in lrq or "link" in lrq):
+                    if "facttransmissionlinkflow" not in lower_rs and hasattr(self.wren_ai_integration, '_synthesize_sql_for_table'):
+                        synth = self.wren_ai_integration._synthesize_sql_for_table("FactTransmissionLinkFlow", query)
+                        if synth:
+                            repaired = synth
             # Always apply temporal refinement and validation, but preserve explicit table usage when appropriate
             corrected = self._validate_and_correct_sql(repaired, query)
+            # Enforce explicit table usage if requested in the query and not present in SQL
+            try:
+                if explicit_tables:
+                    lower_corr = (corrected or "").lower()
+                    if not any(t in lower_corr for t in explicit_tables):
+                        first_explicit = next(iter(explicit_tables))
+                        # Map to canonical case if present in MDL
+                        mdl = getattr(self, 'wren_ai_integration', None)
+                        schema = getattr(mdl, 'mdl_schema', None)
+                        canonical = None
+                        if schema and getattr(schema, 'models', None):
+                            for k in schema.models.keys():
+                                if k.lower() == first_explicit:
+                                    canonical = k
+                                    break
+                        target_table = canonical or first_explicit
+                        if hasattr(self.wren_ai_integration, '_synthesize_sql_for_table'):
+                            synthesized = self.wren_ai_integration._synthesize_sql_for_table(target_table, query)
+                            if synthesized:
+                                corrected = synthesized
+            except Exception:
+                pass
+
             # Schema-driven join injection using FK patterns (lightweight)
             try:
                 if "JOIN DimDates" not in corrected and "strftime('%Y'" in corrected:
@@ -1386,6 +1518,12 @@ class EnhancedRAGService:
                     explicit_bonus += 3.0
                 else:
                     explicit_bonus -= 1.5
+            # Strongly penalize daily models for sub-daily queries
+            if is_sub_daily:
+                if any(t in lower_sql for t in ["factallindiadailysummary", "factstatedailyenergy", "factdailygenerationbreakdown"]):
+                    explicit_bonus -= 3.0
+                if any(t in lower_sql for t in ["facttimeblockpowerdata", "facttimeblockgeneration"]):
+                    explicit_bonus += 2.0
 
             # Prefer fact tables matched by domain intent words
             table_hint_bonus = 0.0
@@ -1405,9 +1543,11 @@ class EnhancedRAGService:
                 else:
                     table_hint_bonus -= 0.2
 
-            # Bias: Prefer wren_mdl strongly; de-emphasize explicit_builder
-            mdl_bias = 0.6 if (cand.get("source") == "wren_mdl" and execution.success) else 0.0
+            # Bias: Prefer wren_mdl strongly; de-emphasize explicit_builder; boost domain_enforced
+            mdl_bias = 0.4 if (cand.get("source") == "wren_mdl" and execution.success) else 0.0
             explicit_builder_bonus = 0.1 if (cand.get("source") == "explicit_builder" and execution.success) else 0.0
+            # Only a small bias for domain_enforced; correctness should come from table hints below
+            domain_enforced_bonus = 0.1 if (cand.get("source") == "domain_enforced" and execution.success) else 0.0
             # Penalize disallowed EnergyMet usage on non-energy models for wren_mdl
             disallowed_penalty = 0.0
             if cand.get("source") == "wren_mdl":
@@ -1417,7 +1557,22 @@ class EnhancedRAGService:
                 if 'energymet' in corrected.lower() and not ('allindiadailysummary' in ftable or 'statedailyenergy' in ftable):
                     disallowed_penalty -= 0.5
 
-            score = success_score + coverage_score + size_score + explicit_bonus + table_hint_bonus + mdl_bias + explicit_builder_bonus + disallowed_penalty
+            # Flow-specific table preference
+            wants_flow = ("flow" in ql) or ("link flow" in ql) or ("linkflow" in ql)
+            if wants_flow:
+                if ("factinternationaltransmissionlinkflow" in lower_sql) or ("facttransmissionlinkflow" in lower_sql):
+                    table_hint_bonus += 1.0
+                if ("factallindiadailysummary" in lower_sql) or ("factstatedailyenergy" in lower_sql):
+                    table_hint_bonus -= 3.0  # hard penalty: wrong table for flow queries
+
+            # Hard guardrails: drop candidates using daily tables for sub-daily or flow intents
+            hard_penalty = 0.0
+            if is_sub_daily and ("factallindiadailysummary" in lower_sql or "factstatedailyenergy" in lower_sql or "factdailygenerationbreakdown" in lower_sql):
+                hard_penalty -= 5.0
+            if wants_flow and ("factallindiadailysummary" in lower_sql or "factstatedailyenergy" in lower_sql):
+                hard_penalty -= 5.0
+
+            score = success_score + coverage_score + size_score + explicit_bonus + table_hint_bonus + mdl_bias + explicit_builder_bonus + domain_enforced_bonus + disallowed_penalty + hard_penalty
 
             scored.append({
                 "source": cand.get("source"),
@@ -1431,10 +1586,18 @@ class EnhancedRAGService:
         if explicit_tables:
             explicit_success = [c for c in scored if c.get("explicit_match") and getattr(c.get("execution"), 'success', False)]
             if explicit_success:
-                # Prefer wren_mdl among explicit matches
-                explicit_success.sort(key=lambda c: 0 if c.get("source") == "wren_mdl" else (1 if c.get("source") == "assembler" else 2))
+                # Prefer wren_mdl and assembler among explicit matches; keep best score order afterwards
+                explicit_success.sort(key=lambda c: (0 if c.get("source") == "wren_mdl" else (1 if c.get("source") == "assembler" else 2), -c.get("score", 0)))
                 return explicit_success
-        return scored
+        # If sub-daily, restrict to time-block tables when available
+        if is_sub_daily:
+            timeblock_only = [c for c in scored if any(t in (c.get("sql") or "").lower() for t in ["facttimeblockpowerdata", "facttimeblockgeneration"])]
+            timeblock_success = [c for c in timeblock_only if getattr(c.get("execution"), 'success', False)]
+            if timeblock_success:
+                # Return sorted by score
+                return sorted(timeblock_success, key=lambda c: -c.get("score", 0))
+        # Sort all candidates by score descending; do not force-select domain_enforced
+        return sorted(scored, key=lambda c: -c.get("score", 0))
 
     def _build_explicit_table_sql(self, table_name: str, query: str) -> Optional[str]:
         """Build a safe SELECT for explicitly mentioned tables using MDL hints."""

@@ -17,6 +17,7 @@ class QueryType(str, Enum):
     STATE = "state"
     GENERATION = "generation"
     TRANSMISSION = "transmission"
+    INTERNATIONAL_TRANSMISSION = "international_transmission"
     EXCHANGE = "exchange"
     EXCHANGE_DETAIL = "exchange_detail"
     TIME_BLOCK = "time_block"
