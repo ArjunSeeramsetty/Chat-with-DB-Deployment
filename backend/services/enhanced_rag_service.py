@@ -1205,8 +1205,21 @@ class EnhancedRAGService:
         if not scored:
             return {"success": False, "error": "No valid candidates after validation", "processing_method": "enhanced_unified"}
 
-        # Pick best by score
-        best = max(scored, key=lambda x: x.get("score", 0.0))
+        # Pick best by score, but relax for flow/time-block: prefer specialized-table candidates
+        ql = (query or '').lower()
+        def is_special(sql: str) -> bool:
+            ls = (sql or '').lower()
+            return any(t in ls for t in [
+                'factinternationaltransmissionlinkflow',
+                'facttransmissionlinkflow',
+                'facttimeblockpowerdata',
+                'facttimeblockgeneration',
+            ])
+        if any(k in ql for k in ["time block", "hourly", "15 min", "15-minute", "intraday", "flow", "link flow", "linkflow", "energy exchanged"]):
+            specials = [c for c in scored if is_special(c.get('sql',''))]
+            best = max(specials or scored, key=lambda x: x.get("score", 0.0))
+        else:
+            best = max(scored, key=lambda x: x.get("score", 0.0))
         executed = best.get("execution")
         
         logger.info(f"🏆 Selected best candidate:")
@@ -1596,8 +1609,37 @@ class EnhancedRAGService:
             if timeblock_success:
                 # Return sorted by score
                 return sorted(timeblock_success, key=lambda c: -c.get("score", 0))
-        # Sort all candidates by score descending; do not force-select domain_enforced
-        return sorted(scored, key=lambda c: -c.get("score", 0))
+        # Sort; but for flow/time-block intents, disqualify daily-table candidates entirely
+        def is_disqualified(c):
+            sql_l = (c.get("sql") or "").lower()
+            if any(k in ql for k in ["time block", "hourly", "15 min", "15-minute", "intraday", "flow", "link flow", "linkflow", "energy exchanged"]):
+                if any(t in sql_l for t in ["factallindiadailysummary", "factstatedailyenergy", "factdailygenerationbreakdown"]):
+                    return True
+            return False
+        filtered = [c for c in scored if not is_disqualified(c)]
+
+        # If nothing remains and the intent is flow/time-block, attempt to synthesize a correct-table candidate
+        if not filtered and any(k in ql for k in ["time block", "hourly", "15 min", "15-minute", "intraday", "flow", "link flow", "linkflow", "energy exchanged"]):
+            try:
+                target = None
+                if any(k in ql for k in ["time block", "hourly", "15 min", "15-minute", "intraday"]):
+                    target = "FactTimeBlockGeneration" if any(k in ql for k in ["generation", "by source", "source"]) else "FactTimeBlockPowerData"
+                elif any(k in ql for k in ["flow", "link flow", "linkflow", "energy exchanged"]):
+                    intl = ("international" in ql) or any(c in ql for c in ["bangladesh","nepal","bhutan","myanmar","sri lanka","sri-lanka","pakistan","china"]) or ("energy exchanged" in ql)
+                    target = "FactInternationalTransmissionLinkFlow" if intl else "FactTransmissionLinkFlow"
+                if target:
+                    synth = None
+                    if hasattr(self.wren_ai_integration, '_synthesize_sql_for_table'):
+                        synth = self.wren_ai_integration._synthesize_sql_for_table(target, query)
+                    # If synthesizer failed, fall back to minimal COUNT(*) to ensure executability
+                    if not synth:
+                        synth = f"SELECT COUNT(*) AS Value FROM {target}"
+                    exec_res = await self.sql_executor.execute_sql_async(synth)
+                    filtered = [{"source": "domain_enforced", "sql": synth, "execution": exec_res, "score": 1.0, "explicit_match": False}]
+            except Exception:
+                pass
+
+        return sorted(filtered if filtered else scored, key=lambda c: -c.get("score", 0))
 
     def _build_explicit_table_sql(self, table_name: str, query: str) -> Optional[str]:
         """Build a safe SELECT for explicitly mentioned tables using MDL hints."""

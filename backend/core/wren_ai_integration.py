@@ -94,14 +94,16 @@ class WrenAIIntegration:
         self.mdl_schema: Optional[MDLSchema] = None
         self.mdl_path = mdl_path or "mdl/"
         self.db_path = db_path
+        # When a pinned MDL (config/power-sector-mdl1.json) is present, we load it exclusively and avoid augment/export
+        self._mdl_static_mode: bool = False
         self._initialize_advanced_vector_store()
         
     async def initialize(self):
         """Initialize Wren AI integration with MDL support"""
         await self._load_mdl_schema()
-        # Augment MDL from SQLite database schema if available
+        # Augment only when not in static MDL mode
         try:
-            if self.db_path:
+            if not self._mdl_static_mode and self.db_path:
                 await self._augment_mdl_from_sqlite()
                 # Persist augmented MDL so it can be inspected and reused
                 try:
@@ -149,24 +151,31 @@ class WrenAIIntegration:
         try:
             mdl_dir = Path(self.mdl_path)
             config_dir = Path("config")
+            # If a pinned MDL file exists, load it exclusively and skip other sources
+            pinned = config_dir / "power-sector-mdl1.json"
+            if pinned.exists():
+                await self._load_mdl_from_json_files([pinned])
+                self._mdl_static_mode = True
+                logger.info(f"Loaded pinned MDL from {pinned}; static mode enabled (no augmentation/export)")
+                return
             # Gather YAML and JSON candidates from mdl/ and config/
             yaml_files = list(mdl_dir.glob("*.yaml")) + list(mdl_dir.glob("*.yml"))
             json_files = list(mdl_dir.glob("*.json")) + list(config_dir.glob("*.json"))
 
             loaded_any = False
-            if yaml_files:
-                await self._load_mdl_from_files(yaml_files)
-                loaded_any = True
+            # if yaml_files:
+            #     await self._load_mdl_from_files(yaml_files)
+            #     loaded_any = True
             if json_files:
                 await self._load_mdl_from_json_files(json_files)
                 loaded_any = True
 
-            if not loaded_any:
-                await self._create_default_energy_mdl()
+            # if not loaded_any:
+            #     await self._create_default_energy_mdl()
 
         except Exception as e:
             logger.error(f"Failed to load MDL schema: {e}")
-            await self._create_default_energy_mdl()
+            # await self._create_default_energy_mdl()
             
     async def _load_mdl_from_files(self, mdl_files: List[Path]):
         """Load MDL schema from YAML files"""
@@ -583,11 +592,16 @@ class WrenAIIntegration:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             # Get table names
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
             tables = [r[0] for r in cur.fetchall()]
+            try:
+                logger.info(f"MDL augment: found {len(tables)} tables in SQLite: {tables}")
+            except Exception:
+                pass
 
             # Load units mapping if available (DimUnits + MetaTableColumnUnits)
-            unit_map: Dict[str, Dict[str, str]] = {}
+            # Structure: unit_map[TableName][ColumnName] = {"name": UnitName, "symbol": UnitSymbol, "category": UnitCategory}
+            unit_map: Dict[str, Dict[str, Dict[str, Optional[str]]]] = {}
             try:
                 if "DimUnits" in tables and "MetaTableColumnUnits" in tables:
                     cur.execute(
@@ -601,16 +615,26 @@ class WrenAIIntegration:
                         schema_name = str(row[0])  # 'main' by default in SQLite
                         tname = str(row[1])
                         cname = str(row[2])
-                        uname = str(row[3])
-                        unit_map.setdefault(tname, {})[cname] = uname
+                        uname = str(row[3]) if row[3] is not None else None
+                        usym = str(row[4]) if row[4] is not None else None
+                        ucat = str(row[5]) if row[5] is not None else None
+                        unit_map.setdefault(tname, {})[cname] = {"name": uname, "symbol": usym, "category": ucat}
             except Exception:
                 unit_map = {}
 
             # Load columns per table
             table_to_cols: Dict[str, Dict[str, Any]] = {}
+            added_models = 0
             for t in tables:
+                try:
+                    logger.info(f"MDL augment: processing table {t}")
+                except Exception:
+                    pass
                 cur.execute(f"PRAGMA table_info('{t}')")
                 cols = [dict(name=row[1], type=row[2]) for row in cur.fetchall()]
+                if not cols:
+                    logger.warning(f"MDL augment: table {t} has no columns from PRAGMA; skipping")
+                    continue
                 # Units from metadata tables when present (no guessing)
                 # Prefer exact table/column case; fallback to case-insensitive match
                 table_units = unit_map.get(t, {})
@@ -619,14 +643,148 @@ class WrenAIIntegration:
                         if ut.lower() == t.lower():
                             table_units = mapping
                             break
-                table_to_cols[t] = {
-                    c["name"]: {
-                        "type": c["type"],
-                        **({"unit": (table_units.get(c["name"]) or next((v for k,v in table_units.items() if k.lower()==c["name"].lower()), None))}
-                           if (table_units.get(c["name"]) or any(k.lower()==c["name"].lower() for k in table_units.keys())) else {})
+                # Helper to infer metric type from unit and column hints
+                def _infer_metric_type(col_name: str, unit_info: Optional[Dict[str, Optional[str]]], sql_type: str) -> Optional[str]:
+                    n = (unit_info or {}).get("name") if unit_info else None
+                    s = (unit_info or {}).get("symbol") if unit_info else None
+                    cat = (unit_info or {}).get("category") if unit_info else None
+                    cn = col_name.lower()
+                    # Normalize strings
+                    def _norm(x: Optional[str]) -> str:
+                        return (x or "").strip().lower()
+                    nn, ss, cc = _norm(n), _norm(s), _norm(cat)
+                    # Percentage
+                    if ss == "%" or "percent" in nn or "percentage" in nn:
+                        return "percentage"
+                    # Power
+                    if ss in {"mw", "gw", "kw"} or any(k in nn for k in ["mw", "watt"]) or "power" in cn:
+                        return "power"
+                    # Energy
+                    if any(k in nn for k in ["mu", "mwh", "kwh", "gwh"]) or "energy" in cn:
+                        return "energy"
+                    # Time
+                    if any(k in ss for k in ["hh:mm", "hhmm"]) or any(k in nn for k in ["hour", "minute", "second"]) or any(k in cn for k in ["duration", "time", "timestamp", "blocktime", "timeblock"]):
+                        return "time"
+                    # Ratio
+                    if any(k in cn for k in ["ratio", "share", "index", "factor"]):
+                        return "ratio"
+                    return None
+
+                # Helper to generate human-readable column descriptions
+                def _generate_column_description(table_name: str, col_name: str, unit_info: Optional[Dict[str, Optional[str]]]) -> str:
+                    ln = col_name.lower()
+                    u_sym = (unit_info or {}).get("symbol") if unit_info else None
+                    u_name = (unit_info or {}).get("name") if unit_info else None
+                    unit_hint = u_sym or u_name
+                    unit_suffix = f" ({unit_hint})" if unit_hint else ""
+                    # Known semantic descriptions by exact name
+                    known: Dict[str, str] = {
+                        # Regional daily summary (FAIDS)
+                        "energymet": "Total energy met (supplied) for the period" ,
+                        "energyshortage": "Total energy shortage (demand not met) during the period",
+                        "maxdemandscada": "Maximum demand measured by SCADA in the period",
+                        "eveningpeakdemandmet": "Evening peak demand that was met during peak hours",
+                        "peakshortage": "Peak demand shortage during the period",
+                        "scheduledrawal": "Scheduled drawal (scheduled energy) for the region",
+                        "actualdrawal": "Actual drawal (actual energy) for the region",
+                        "overunderdrawal": "Over/under drawal compared to schedule",
+                        "shareresintotalgeneration": "Share of renewable energy sources in total generation",
+                        "frequencyviolationindex": "Index summarizing frequency violations",
+                        "durationfrequencybelow49_7": "Duration when system frequency was below 49.7 Hz",
+                        "durationfrequency_49_7_to_49_8": "Duration when system frequency was between 49.7 and 49.8 Hz",
+                        "durationfrequency_49_8_to_49_9": "Duration when system frequency was between 49.8 and 49.9 Hz",
+                        "durationfrequencybelow49_9": "Duration when system frequency was below 49.9 Hz",
+                        "durationfrequency_49_9_to_50_05": "Duration when system frequency was between 49.9 and 50.05 Hz",
+                        "durationfrequencyabove50_05": "Duration when system frequency was above 50.05 Hz",
+                        "regionddf": "Demand Diversity Factor at regional level",
+                        "statesddf": "Demand Diversity Factor aggregated at states level",
+                        "solarhrmaxdemand": "Maximum demand during solar hours",
+                        "solarhrmaxdemandtime": "Time of maximum demand during solar hours",
+                        "solarhrshortage": "Demand shortage during solar hours",
+                        "nonsolarhrmaxdemand": "Maximum demand during non-solar hours",
+                        "nonsolarhrmaxdemandtime": "Time of maximum demand during non-solar hours",
+                        "nonsolarhrshortage": "Demand shortage during non-solar hours",
+                        # State daily energy (FSDE)
+                        "staten ame": "Name of the state",
+                        "stateid": "Surrogate identifier of the state",
+                        # Generation breakdown
+                        "generationamount": "Energy generated by the source during the period",
+                        "sourcename": "Name of the generation source (e.g., Solar, Wind, Hydro, Thermal)",
+                        # Time block power data
+                        "demandmet": "System demand met in the time block",
+                        "netdemandmet": "Net demand met after exchanges in the time block",
+                        "totalgeneration": "Total generation in the time block",
+                        "nettransnationalexchange": "Net transnational exchange (import minus export) in the time block",
+                        "blocktime": "Timestamp of the 15-minute time block",
+                        "blocknumber": "Ordinal index of the time block within the day",
+                        # Time block generation
+                        "generationoutput": "Power output by the generation source in the time block",
+                        # Transmission link flow (domestic)
+                        "maximport": "Maximum instantaneous import power on the link",
+                        "maxexport": "Maximum instantaneous export power on the link",
+                        "importenergy": "Total imported energy over the period",
+                        "exportenergy": "Total exported energy over the period",
+                        "netimportenergy": "Net imported energy (import minus export) over the period",
+                        "lineidentifier": "Identifier/name of the transmission link or corridor",
+                        # International transmission link flow
+                        "energyexchanged": "Total energy exchanged across the international link over the period",
+                        "maxloading": "Maximum loading (power) observed on the international link",
+                        "minloading": "Minimum loading (power) observed on the international link",
+                        "avgloading": "Average loading (power) observed on the international link",
+                        # Country daily exchange
+                        "countryname": "Name of the country involved in power exchange",
                     }
-                    for c in cols
-                }
+                    if ln in known:
+                        return f"{known[ln]}{unit_suffix}".strip()
+                    # Generic fallbacks
+                    if ln.endswith("id") and ln != "dateid":
+                        return f"Identifier/foreign key field for {col_name}"
+                    if "date" in ln:
+                        return "Date reference for the record"
+                    if "time" in ln:
+                        return f"Time-related field{unit_suffix}".strip()
+                    if "energy" in ln:
+                        return f"Energy-related measure{unit_suffix}".strip()
+                    if "demand" in ln:
+                        return f"Demand-related measure{unit_suffix}".strip()
+                    if "generation" in ln:
+                        return f"Generation-related measure{unit_suffix}".strip()
+                    if "frequency" in ln:
+                        return f"System frequency metric{unit_suffix}".strip()
+                    return f"{col_name} field in {table_name}{unit_suffix}".strip()
+
+                # Build detailed columns map
+                cols_def: Dict[str, Dict[str, Any]] = {}
+                for c in cols:
+                    colname = c["name"]
+                    # Find unit info (case-insensitive match)
+                    unit_info = None
+                    if table_units:
+                        unit_info = table_units.get(colname)
+                        if unit_info is None:
+                            for uk, uv in table_units.items():
+                                if uk.lower() == colname.lower():
+                                    unit_info = uv
+                                    break
+                    # When older structure is a string, normalize to dict
+                    if unit_info is not None and not isinstance(unit_info, dict):
+                        unit_info = {"name": str(unit_info), "symbol": None, "category": None}
+
+                    metric_type = _infer_metric_type(colname, unit_info, c["type"])
+                    col_entry: Dict[str, Any] = {"type": c["type"]}
+                    if unit_info and unit_info.get("name"):
+                        col_entry["unit"] = unit_info.get("name")
+                    if unit_info and unit_info.get("symbol"):
+                        col_entry["unit_symbol"] = unit_info.get("symbol")
+                    if unit_info and unit_info.get("category"):
+                        col_entry["unit_category"] = unit_info.get("category")
+                    if metric_type:
+                        col_entry["metric_type"] = metric_type
+                    # Add description
+                    col_entry["description"] = _generate_column_description(t, colname, unit_info)
+                    cols_def[colname] = col_entry
+
+                table_to_cols[t] = cols_def
 
                 # Compute heuristic hints
                 def _pick_preferred_time(col_names: List[str]) -> Optional[str]:
@@ -669,15 +827,12 @@ class WrenAIIntegration:
                     if candidate in col_names_list:
                         cat_guess = candidate
                         break
-                # collect per-column unit hints (from metadata mapping only)
-                unit_hints = {cn: cd.get("unit") for cn, cd in table_to_cols[t].items() if cd.get("unit")}
                 hints = {
                     "preferred_time_column": _pick_preferred_time(col_names_list),
                     "preferred_value_columns": _pick_preferred_values(col_names_list),
                     "has_date_fk": ("DateID" in col_names_list),
                     "preferred_category": cat_guess,
                     "role": role,
-                    "units": unit_hints,
                 }
 
                 if t not in self.mdl_schema.models:
@@ -692,15 +847,11 @@ class WrenAIIntegration:
                         },
                         metadata={"business_name": t.replace("Fact", "").replace("Dim", "").strip()}
                     )
+                    added_models += 1
                 else:
-                    # Merge missing columns
-                    existing_cols = self.mdl_schema.models[t].definition.setdefault("columns", {})
-                    existing_cols.update({k: v for k, v in table_to_cols[t].items() if k not in existing_cols})
-                    # Merge hints
-                    existing_hints = self.mdl_schema.models[t].definition.setdefault("hints", {})
-                    for hk, hv in hints.items():
-                        if hk not in existing_hints or not existing_hints[hk]:
-                            existing_hints[hk] = hv
+                    # STRICT SYNC: replace columns and hints with SQLite-derived structure
+                    self.mdl_schema.models[t].definition["columns"] = table_to_cols[t]
+                    self.mdl_schema.models[t].definition["hints"] = hints
                     # Ensure synonyms exists
                     syns = self.mdl_schema.models[t].definition.setdefault("synonyms", [])
                     for s in [t, t.replace("_", " "), t.lower(), t.replace("_", "").lower()]:
@@ -729,6 +880,20 @@ class WrenAIIntegration:
                     existing = [r for r in self.mdl_schema.relationships if r.source_model == rel.source_model and r.target_model == rel.target_model and r.join_conditions == rel.join_conditions]
                     if not existing:
                         self.mdl_schema.relationships.append(rel)
+            # Prune models not present in SQLite (remove stale/default-only models)
+            try:
+                existing_names = set(self.mdl_schema.models.keys())
+                keep = set(tables)
+                removed = [name for name in existing_names if name not in keep]
+                if removed:
+                    for name in removed:
+                        try:
+                            del self.mdl_schema.models[name]
+                        except Exception:
+                            pass
+                logger.info(f"MDL augment: models after augmentation = {len(self.mdl_schema.models)} (added {added_models})")
+            except Exception:
+                pass
         finally:
             conn.close()
 

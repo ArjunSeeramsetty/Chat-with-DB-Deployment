@@ -55,6 +55,40 @@ class SchemaLinker:
         self.llm_provider = llm_provider
         self.entity_loader = get_entity_loader()
 
+        # Load pinned MDL (if present) for table/column hints
+        self.mdl_models: Dict[str, Dict[str, Any]] = {}
+        try:
+            from pathlib import Path as _Path
+            import json as _json
+            mdl_path = _Path("config/power-sector-mdl1.json")
+            if mdl_path.exists():
+                with open(mdl_path, "r", encoding="utf-8") as f:
+                    j = _json.load(f)
+                # Normalize into a map of name -> definition
+                models_obj = j.get("models")
+                # Handle dict form: {name: node}
+                if isinstance(models_obj, dict):
+                    for name, node in models_obj.items():
+                        if isinstance(node, dict) and "definition" in node:
+                            self.mdl_models[name] = node.get("definition", {})
+                        else:
+                            # If already a pure definition map
+                            self.mdl_models[name] = node or {}
+                # Handle list form: [{name, definition, metadata}]
+                elif isinstance(models_obj, list):
+                    for node in models_obj:
+                        try:
+                            if not isinstance(node, dict):
+                                continue
+                            name = node.get("name")
+                            definition = node.get("definition") or {}
+                            if name:
+                                self.mdl_models[name] = definition
+                        except Exception:
+                            continue
+        except Exception as _e:
+            logger.warning(f"SchemaLinker: Failed to load pinned MDL: {_e}")
+
         # Initialize TF-IDF vectorizer
         self.vectorizer = TfidfVectorizer(
             lowercase=True, stop_words="english", ngram_range=(1, 2), max_features=1000
@@ -692,9 +726,19 @@ class SchemaLinker:
     def _get_all_columns_for_table(self, table_name: str) -> List[str]:
         """Get all column names for a given table from schema_info."""
         if not self.schema_info:
-            return []
-
-        return self.schema_info.get(table_name, [])
+            cols = []
+        else:
+            cols = list(self.schema_info.get(table_name, []) or [])
+        # Augment with MDL columns if available
+        try:
+            mdl_def = self.mdl_models.get(table_name) or self.mdl_models.get(table_name.strip())
+            mdl_cols = list((mdl_def or {}).get("columns", {}).keys()) if mdl_def else []
+            for c in mdl_cols:
+                if c not in cols:
+                    cols.append(c)
+        except Exception:
+            pass
+        return cols
 
     def _extract_query_words(self, user_query: str) -> List[str]:
         """Extract meaningful words from user query for column matching."""
@@ -1051,11 +1095,96 @@ class SchemaLinker:
         """
         # Get all columns for the specific table only
         all_columns = self._get_all_columns_for_table(table_name)
+        try:
+            if table_name in ("FactInternationalTransmissionLinkFlow", "FactTransmissionLinkFlow", "FactTimeBlockPowerData", "FactTimeBlockGeneration"):
+                logger.info(f"SchemaLinker: inventory for {table_name}: {all_columns}")
+        except Exception:
+            pass
         if not all_columns:
             logger.warning(f"No columns found for table {table_name}")
             return ""
 
         query_lower = user_query.lower()
+
+        # Rules-based fallback using business rules when provided query_type
+        if query_type:
+            try:
+                rule_col = self._get_energy_column_for_table(table_name, query_type)
+                if rule_col:
+                    # Ensure it exists among known columns (schema or MDL)
+                    if rule_col in all_columns:
+                        logger.info(f"Rules-based column match: {rule_col} for {table_name} ({query_type})")
+                        return rule_col
+                    # If not in schema_info, accept if present in MDL columns
+                    try:
+                        mdl_def = self.mdl_models.get(table_name) or {}
+                        mdl_cols = list((mdl_def or {}).get("columns", {}).keys()) if mdl_def else []
+                        if rule_col in mdl_cols:
+                            logger.info(f"Rules-based column match via MDL: {rule_col} for {table_name} ({query_type})")
+                            return rule_col
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # MDL hint-based fallback: choose from preferred_value_columns
+        try:
+            mdl_def = self.mdl_models.get(table_name) or {}
+            hints = mdl_def.get("hints", {}) if isinstance(mdl_def, dict) else {}
+            pvals = list(hints.get("preferred_value_columns") or [])
+            # Heuristics by query content
+            if pvals:
+                # Transmission link flow
+                if table_name.lower() == "facttransmissionlinkflow":
+                    if "net" in query_lower and "import" in query_lower:
+                        for cand in ["NetImportEnergy"]:
+                            if cand in all_columns:
+                                return cand
+                    if "import" in query_lower:
+                        for cand in ["ImportEnergy", "MaxImport"]:
+                            if cand in all_columns:
+                                return cand
+                    if "export" in query_lower:
+                        for cand in ["ExportEnergy", "MaxExport"]:
+                            if cand in all_columns:
+                                return cand
+                    # Default preference order
+                    for cand in ["NetImportEnergy", "ImportEnergy", "ExportEnergy", "MaxImport", "MaxExport"]:
+                        if cand in all_columns:
+                            return cand
+                # International transmission link flow
+                if table_name.lower() == "factinternationaltransmissionlinkflow":
+                    if "loading" in query_lower:
+                        for cand in ["MaxLoading", "AvgLoading", "MinLoading"]:
+                            if cand in all_columns:
+                                return cand
+                    for cand in ["EnergyExchanged", "AvgLoading", "MaxLoading"]:
+                        if cand in all_columns:
+                            return cand
+                # Time block power data
+                if table_name.lower() == "facttimeblockpowerdata":
+                    if "demand" in query_lower:
+                        for cand in ["DemandMet", "NetDemandMet"]:
+                            if cand in all_columns:
+                                return cand
+                    if "generation" in query_lower:
+                        for cand in ["TotalGeneration"]:
+                            if cand in all_columns:
+                                return cand
+                    for cand in pvals:
+                        if cand in all_columns:
+                            return cand
+                # Time block generation
+                if table_name.lower() == "facttimeblockgeneration":
+                    for cand in ["GenerationOutput"]:
+                        if cand in all_columns:
+                            return cand
+                # Generic: first preferred that exists
+                for cand in pvals:
+                    if cand in all_columns:
+                        return cand
+        except Exception:
+            pass
 
         # Check for exact matches or partial matches within the table's columns
         exact_matches = []
@@ -1252,6 +1381,45 @@ class SchemaLinker:
             except Exception as e:
                 logger.warning(f"LLM Hook #2 (Column Linking) failed: {e}")
                 return ""
+
+        # Table-specific deterministic fallbacks using MDL-known columns
+        try:
+            tl = table_name.lower()
+            # International transmission link flow
+            if tl == "factinternationaltransmissionlinkflow":
+                if "energy exchanged" in query_lower and "EnergyExchanged" in all_columns:
+                    return "EnergyExchanged"
+                for cand in ["EnergyExchanged", "AvgLoading", "MaxLoading", "MinLoading"]:
+                    if cand in all_columns:
+                        return cand
+            # Domestic transmission link flow
+            if tl == "facttransmissionlinkflow":
+                if "import" in query_lower:
+                    for cand in ["ImportEnergy", "MaxImport", "NetImportEnergy"]:
+                        if cand in all_columns:
+                            return cand
+                if "export" in query_lower:
+                    for cand in ["ExportEnergy", "MaxExport"]:
+                        if cand in all_columns:
+                            return cand
+                for cand in ["NetImportEnergy", "ImportEnergy", "ExportEnergy", "MaxImport", "MaxExport"]:
+                    if cand in all_columns:
+                        return cand
+            # Time block power data
+            if tl == "facttimeblockpowerdata":
+                if any(k in query_lower for k in ["power", "demand"]):
+                    for cand in ["DemandMet", "NetDemandMet", "TotalGeneration"]:
+                        if cand in all_columns:
+                            return cand
+                for cand in ["TotalGeneration", "DemandMet", "NetTransnationalExchange"]:
+                    if cand in all_columns:
+                        return cand
+            # Time block generation
+            if tl == "facttimeblockgeneration":
+                if "GenerationOutput" in all_columns:
+                    return "GenerationOutput"
+        except Exception:
+            pass
 
         # No fallback - return empty string to indicate no match found
         logger.warning(

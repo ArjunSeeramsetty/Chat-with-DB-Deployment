@@ -1566,12 +1566,34 @@ class SQLAssembler:
                     table_name = "FactDailyGenerationBreakdown"
                 elif analysis.query_type.value == "transmission":
                     table_name = "FactTransmissionLinkFlow"
+                elif analysis.query_type.value == "international_transmission":
+                    table_name = "FactInternationalTransmissionLinkFlow"
+                elif analysis.query_type.value == "time_block":
+                    table_name = "FactTimeBlockPowerData"
+                elif analysis.query_type.value == "time_block_generation":
+                    table_name = "FactTimeBlockGeneration"
                 elif analysis.query_type.value == "exchange":
                     table_name = "FactTransnationalExchangeDetail"
                 elif analysis.query_type.value == "country_daily_exchange":
                     table_name = "FactCountryDailyExchange"
 
                 logger.info(f"Selected table: {table_name}, query_type: {query_type}")
+
+                # Normalize measure category based on query/table to guide rules
+                try:
+                    oq_lower = (original_query or "").lower()
+                    if analysis.query_type.value == "international_transmission":
+                        query_type = "energy"  # EnergyExchanged is energy
+                    elif analysis.query_type.value == "transmission":
+                        # Prefer energy when user asks totals/sum/energy; else transmission (MaxImport/MaxExport)
+                        if any(k in oq_lower for k in ["energy", "total", "sum", "exchanged"]):
+                            query_type = "energy"
+                        else:
+                            query_type = "transmission"
+                    elif analysis.query_type.value in ("time_block", "time_block_generation"):
+                        query_type = "power"
+                except Exception:
+                    pass
 
                 # Use similarity-based column matching with fallback to business rules
                 energy_column = context.schema_linker.get_best_column_match(
@@ -1584,35 +1606,44 @@ class SQLAssembler:
                 )
 
                 logger.info(f"Similarity-based column match result: {energy_column}")
+                try:
+                    if table_name in ("FactInternationalTransmissionLinkFlow", "FactTransmissionLinkFlow", "FactTimeBlockPowerData", "FactTimeBlockGeneration"):
+                        inv = context.schema_linker._get_all_columns_for_table(table_name)
+                        logger.info(f"Assembler: inventory for {table_name}: {inv}")
+                        logger.info(f"Assembler: resolved energy_column for {table_name}: {energy_column}")
+                except Exception:
+                    pass
 
-                # If no column match found, return None to trigger LLM fallback
+                # If no column match found, attempt MDL-driven deterministic fallback
                 if not energy_column:
-                    # === LLM Hook #3 – "Template Slot Filler" ===
-                    if self.llm_provider:
-                        try:
-                            table_name = analysis.main_table
-                            candidate_columns = (
-                                context.schema_info.tables.get(table_name, [])
-                                if context.schema_info and context.schema_info.tables
-                                else []
-                            )
-                            prompt = f"Given the natural language query '{original_query}', choose the correct column for the {{energy_column}} slot in the SQL template for the table '{table_name}' from this list: {candidate_columns}."
-
-                            # For now, we'll use a simple approach without async to avoid complexity
-                            # In a production system, this would be properly async
-                            logger.info(
-                                f"LLM Hook #3: Attempting slot filling for query: {original_query}"
-                            )
-                            # Note: This is a simplified version - in production, you'd want proper async handling
-                            return None  # Skip for now to avoid async issues
-                        except Exception as e:
-                            logger.warning(f"LLM Hook #3 (Slot Filler) failed: {e}")
-                            return None  # Fail template generation if LLM fails
-                    else:
-                        logger.warning(
-                            "Template slot 'energy_column' could not be resolved."
-                        )
-                        return None
+                    try:
+                        mdl_def = getattr(context.schema_linker, "mdl_models", {}).get(table_name) or {}
+                        hints = mdl_def.get("hints", {}) if isinstance(mdl_def, dict) else {}
+                        pvals = list(hints.get("preferred_value_columns") or [])
+                        tl = table_name.lower()
+                        if tl == "factinternationaltransmissionlinkflow":
+                            for cand in ["EnergyExchanged", "AvgLoading", "MaxLoading", "MinLoading"]:
+                                if cand in (context.schema_linker._get_all_columns_for_table(table_name) or pvals):
+                                    energy_column = cand
+                                    break
+                        elif tl == "facttransmissionlinkflow":
+                            for cand in ["NetImportEnergy", "ImportEnergy", "ExportEnergy", "MaxImport", "MaxExport"]:
+                                if cand in (context.schema_linker._get_all_columns_for_table(table_name) or pvals):
+                                    energy_column = cand
+                                    break
+                        elif tl == "facttimeblockpowerdata":
+                            for cand in ["DemandMet", "NetDemandMet", "TotalGeneration"]:
+                                if cand in (context.schema_linker._get_all_columns_for_table(table_name) or pvals):
+                                    energy_column = cand
+                                    break
+                        elif tl == "facttimeblockgeneration":
+                            if "GenerationOutput" in (context.schema_linker._get_all_columns_for_table(table_name) or pvals):
+                                energy_column = "GenerationOutput"
+                    except Exception:
+                        energy_column = energy_column or ""
+                if not energy_column:
+                    logger.warning("Template slot 'energy_column' could not be resolved after MDL fallback.")
+                    return None
 
                 # Generate informative column alias
                 column_alias = self._generate_column_alias(

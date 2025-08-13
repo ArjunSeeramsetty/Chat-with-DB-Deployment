@@ -122,8 +122,11 @@ class IntentAnalyzer:
             return QueryType.TIME_BLOCK
 
         # Force transmission/international link flow
-        if ("flow" in query_lower or "link flow" in query_lower or "linkflow" in query_lower):
+        if ("flow" in query_lower or "link flow" in query_lower or "linkflow" in query_lower or "energy exchanged" in query_lower):
             if ("international" in query_lower) or any(c in query_lower for c in ["bangladesh","nepal","bhutan","myanmar"]):
+                return QueryType.INTERNATIONAL_TRANSMISSION
+            # Heuristic: 'energy exchanged' and 'line-wise' implies international link flow table
+            if "energy exchanged" in query_lower and ("line-wise" in query_lower or "line wise" in query_lower or "by line" in query_lower):
                 return QueryType.INTERNATIONAL_TRANSMISSION
             if "transmission" in query_lower or "link" in query_lower:
                 return QueryType.TRANSMISSION

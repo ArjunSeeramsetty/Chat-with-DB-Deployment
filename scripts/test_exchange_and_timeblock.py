@@ -35,7 +35,7 @@ TESTS: List[TestCase] = [
     # International link flow with intrinsic time column (no DimDates join)
     TestCase(
         case_id="FITLF_total_flow_2024",
-        query="Show total international link flow in 2024",
+        query="What is the line-wise total energy exchanged in 2024",
         required_sql_parts=[
             "from factinternationaltransmissionlinkflow",
         ],
@@ -45,7 +45,7 @@ TESTS: List[TestCase] = [
     # Transmission link flow monthly
     TestCase(
         case_id="FTLF_monthly_flow_2025",
-        query="Show monthly transmission link flow in 2025",
+        query="What is the monthly transmission link flow in 2025",
         required_sql_parts=[
             "from facttransmissionlinkflow",
         ],
@@ -55,7 +55,7 @@ TESTS: List[TestCase] = [
     # Time-block power hourly/day series
     TestCase(
         case_id="FTBPD_hourly_2025_01_01",
-        query="Show hourly power on 2025-01-01 from time block data",
+        query="What is the hourly power on 2025-01-01 from time block data",
         required_sql_parts=[
             "from facttimeblockpowerdata",
         ],
@@ -110,6 +110,8 @@ async def main():
         results.append(r)
         status = "PASS" if r['passed'] else "FAIL"
         print(f"[{status}] {r['id']} ({r['duration_ms']} ms) rows={r['rows']} candidate={r.get('candidate')}")
+        if r.get('sql'):
+            print(f"SQL ({r['id']}): {r['sql']}")
 
     print("\nSummary:")
     total = len(results)
@@ -122,7 +124,7 @@ async def main():
         for r in failures:
             print(f"- {r['id']} success={r['success']} req_ok={r['required_ok']} rows={r['rows']} error={r['error']}")
             if r.get('sql'):
-                print("  SQL:", (r['sql'][:200]).replace('\n',' '))
+                print("  SQL:", r['sql'])
 
 
 if __name__ == '__main__':
