@@ -1,0 +1,484 @@
+# Business Rules and Configuration for Text-to-SQL System
+# Version: 2.0.0
+
+# SQL Generation Rules
+sql_generation:
+  max_attempts: 3
+  confidence_thresholds:
+    comprehensive: 0.8
+    balanced: 0.6
+    fast: 0.4
+  fallback_threshold: 0.4
+  
+# Validation Rules
+validation:
+  sqlite_compatibility: true
+  security_checks: true
+  schema_validation: true
+  max_query_length: 1000
+  
+# Schema Mapping with Data Type Categorization
+schema_mapping:
+  # POWER columns (MW) - can use MAX, MIN, AVG
+  power_columns:
+    FactAllIndiaDailySummary:
+      MaxDemandSCADA: "power"
+      EveningPeakDemandMet: "power"
+      SolarHRMaxDemand: "power"
+      NonSolarHRMaxDemand: "power"
+      PeakShortage: "power"
+      SolarHRShortage: "power"
+      NonSolarHRShortage: "power"
+    FactStateDailyEnergy:
+      MaximumDemand: "power"
+    FactTimeBlockPowerData:
+      TotalGeneration: "power"
+      DemandMet: "power"
+      NetDemandMet: "power"
+      NetTransnationalExchange: "power"
+    FactTimeBlockGeneration:
+      GenerationOutput: "power"
+
+  # ENERGY columns (MWh) - can use SUM, MAX, MIN, AVG
+  energy_columns:
+    FactAllIndiaDailySummary:
+      EnergyMet: "energy"
+      EnergyShortage: "energy"
+      ScheduleDrawal: "energy"
+      ActualDrawal: "energy"
+      OverUnderDrawal: "energy"
+    FactStateDailyEnergy:
+      EnergyMet: "energy"
+      EnergyShortage: "energy"
+      DrawalSchedule: "energy"
+      ActualDrawal: "energy"
+      OverUnderDrawal: "energy"
+    FactDailyGenerationBreakdown:
+      GenerationAmount: "energy"
+    FactTransmissionLinkFlow:
+      ImportEnergy: "energy"
+      ExportEnergy: "energy"
+      NetImportEnergy: "energy"
+    FactInternationalTransmissionLinkFlow:
+      EnergyExchanged: "energy"
+    FactCountryDailyExchange:
+      TotalEnergyExchanged: "energy"
+    FactTransnationalExchangeDetail:
+      ExchangeValue: "energy"
+    FactTimeBlockPowerData:
+      NetTransnationalExchange: "energy"
+
+  # RATIO columns (dimensionless) - can use AVG, MAX, MIN
+  ratio_columns:
+    FactAllIndiaDailySummary:
+      ShareRESInTotalGeneration: "ratio"
+      ShareNonFossilInTotalGeneration: "ratio"
+      FrequencyViolationIndex: "ratio"
+      RegionDDF: "ratio"
+      StatesDDF: "ratio"
+
+  # PERCENTAGE columns (%) - can use AVG, MAX, MIN
+  percentage_columns:
+    FactAllIndiaDailySummary:
+      DurationFrequencyBelow49_7: "percentage"
+      DurationFrequency_49_7_to_49_8: "percentage"
+      DurationFrequency_49_8_to_49_9: "percentage"
+      DurationFrequencyBelow49_9: "percentage"
+      DurationFrequency_49_9_to_50_05: "percentage"
+      DurationFrequencyAbove50_05: "percentage"
+
+  # TIME columns (hours/minutes) - can use SUM, MAX, MIN, AVG
+  time_columns:
+    FactAllIndiaDailySummary:
+      TimeOfMaxDemandMet: "time"
+      SolarHRMaxDemandTime: "time"
+      NonSolarHRMaxDemandTime: "time"
+
+  # OUTAGE columns (MW) - can use SUM, MAX, MIN, AVG
+  outage_columns:
+    FactAllIndiaDailySummary:
+      CentralSectorOutage: "outage"
+      StateSectorOutage: "outage"
+      TotalOutage: "outage"
+
+  # TRANSMISSION columns (MW) - can use MAX, MIN, AVG
+  transmission_columns:
+    FactTransmissionLinkFlow:
+      MaxImport: "transmission"
+      MaxExport: "transmission"
+    FactInternationalTransmissionLinkFlow:
+      MaxLoading: "transmission"
+      MinLoading: "transmission"
+      AvgLoading: "transmission"
+
+  # EXCHANGE columns (MW) - can use MAX, MIN, AVG
+  exchange_columns:
+    FactCountryDailyExchange:
+      PeakExchange: "exchange"
+
+  # Legacy mappings for backward compatibility
+  energy_demand_columns:
+    FactDailyGenerationBreakdown: "GenerationAmount"
+    FactAllIndiaDailySummary: "EnergyMet"
+    FactStateDailyEnergy: "EnergyMet"
+
+  power_demand_columns:
+    FactAllIndiaDailySummary: "MaxDemandSCADA"
+    FactStateDailyEnergy: "MaximumDemand"
+    FactTimeBlockGeneration: "GenerationOutput"
+
+  evening_demand_columns:
+    FactAllIndiaDailySummary: "EveningPeakDemandMet"
+    FactStateDailyEnergy: "EveningPeakDemand"
+
+  drawal_schedule_columns:
+    FactAllIndiaDailySummary: "ScheduleDrawal"
+    FactStateDailyEnergy: "DrawalSchedule"
+
+  actual_drawal_columns:
+    FactAllIndiaDailySummary: "ActualDrawal"
+    FactStateDailyEnergy: "ActualDrawal"
+
+  shortage_columns:
+    FactAllIndiaDailySummary: "EnergyShortage"
+    FactStateDailyEnergy: "EnergyShortage"
+
+  transmission_flow_columns:
+    FactTransmissionLinkFlow:
+      MaxImport: "transmission"  # Maximum Import Power (MW)
+      MaxExport: "transmission"  # Maximum Export Power (MW)
+      ImportEnergy: "energy"     # Energy Imported for the day using the Line (MWh)
+      ExportEnergy: "energy"     # Energy Exported for the day using the Line (MWh)
+      NetImportEnergy: "energy"  # Net Energy Imported (ImportEnergy - ExportEnergy)
+    FactInternationalTransmissionLinkFlow:
+      MaxLoading: "transmission"    # Maximum Power/Load observed on the Transmission Line
+      MinLoading: "transmission"    # Minimum Power/Load observed on the Transmission Line
+      AvgLoading: "transmission"    # Average Power/Load observed on the Transmission Line
+      EnergyExchanged: "energy"     # Energy Imported using the Transmission Line
+
+  exchange_columns:
+    FactCountryDailyExchange: "TotalEnergyExchanged"
+    FactCountryDailyExchange: "PeakExchange"
+    FactTransnationalExchangeDetail: "ExchangeValue"
+
+  block_power_columns:
+    FactTimeBlockPowerData: "DemandMet"
+    FactTimeBlockPowerData: "NetDemandMet"
+    FactTimeBlockPowerData: "NetTransnationalExchange"
+    FactTimeBlockGeneration: "GenerationOutput"
+    FactTimeBlockPowerData: "TotalGeneration"
+
+  table_relationships:
+    state_queries:
+      main_table: "FactStateDailyEnergy"
+      dimension_table: "DimStates"
+      join_key: "StateID"
+      name_column: "StateName"
+    
+    region_queries:
+      main_table: "FactAllIndiaDailySummary"
+      dimension_table: "DimRegions"
+      join_key: "RegionID"
+      name_column: "RegionName"
+    
+    generation_queries:
+      main_table: "FactDailyGenerationBreakdown"
+      dimension_table: "DimGenerationSources"
+      join_key: "GenerationSourceID"
+      name_column: "SourceName"
+
+    transmission_queries:
+      main_table: "FactTransmissionLinkFlow"
+      dimension_table: "DimTransmissionLines"
+      join_key: "TransmissionLinkID"
+      name_column: "TransmissionLineName"
+
+    exchange_queries:
+      main_table: "FactCountryDailyExchange"
+      dimension_table: "DimCountries"
+      join_key: "CountryID"
+      name_column: "CountryName"
+
+    time_block_queries:
+      main_table: "FactTimeBlockGeneration"
+      dimension_table: "DimTimeBlocks"
+      join_key: "TimeBlockID"
+      name_column: "TimeBlockName"
+
+# Intent Recognition
+intent_recognition:
+  growth_keywords:
+    - "growth"
+    - "increase"
+    - "decrease"
+    - "trend"
+    - "monthly growth"
+    - "quarterly growth"
+    - "yearly growth"
+  
+  comparison_keywords:
+    - "compare"
+    - "versus"
+    - "vs"
+    - "against"
+    - "difference"
+    - "higher"
+    - "lower"
+  
+  aggregation_keywords:
+    - "total"
+    - "sum"
+    - "average"
+    - "mean"
+    - "maximum"
+    - "minimum"
+    - "count"
+
+# Entity Recognition
+entity_recognition:
+  indian_states:
+    - "maharashtra"
+    - "delhi"
+    - "karnataka"
+    - "tamil nadu"
+    - "telangana"
+    - "gujarat"
+    - "west bengal"
+    - "rajasthan"
+    - "uttar pradesh"
+    - "andhra pradesh"
+    - "kerala"
+    - "madhya pradesh"
+    - "punjab"
+    - "haryana"
+    - "bihar"
+    - "odisha"
+    - "assam"
+    - "jharkhand"
+    - "chhattisgarh"
+    - "himachal pradesh"
+    - "uttarakhand"
+    - "goa"
+    - "manipur"
+    - "meghalaya"
+    - "tripura"
+    - "nagaland"
+    - "arunachal pradesh"
+    - "mizoram"
+    - "sikkim"
+    - "jammu and kashmir"
+    - "ladakh"
+  
+  indian_regions:
+    - "northern region"
+    - "southern region"
+    - "eastern region"
+    - "western region"
+    - "north eastern region"
+    - "central region"
+  
+  # Region name mappings (synonyms/aliases -> canonical region name)
+  region_name_mappings:
+    nr: "Northern Region"
+    north: "Northern Region"
+    northern: "Northern Region"
+    "northern region": "Northern Region"
+    sr: "Southern Region"
+    south: "Southern Region"
+    southern: "Southern Region"
+    "southern region": "Southern Region"
+    er: "Eastern Region"
+    east: "Eastern Region"
+    eastern: "Eastern Region"
+    "eastern region": "Eastern Region"
+    wr: "Western Region"
+    west: "Western Region"
+    western: "Western Region"
+    "western region": "Western Region"
+    ner: "North Eastern Region"
+    "north east": "North Eastern Region"
+    "north eastern": "North Eastern Region"
+    "north eastern region": "North Eastern Region"
+  
+  # State name mappings (lowercase to proper case)
+  state_name_mappings:
+    maharashtra: "Maharashtra"
+    delhi: "Delhi"
+    karnataka: "Karnataka"
+    "tamil nadu": "Tamil Nadu"
+    telangana: "Telangana"
+    gujarat: "Gujarat"
+    "west bengal": "West Bengal"
+    rajasthan: "Rajasthan"
+    "uttar pradesh": "Uttar Pradesh"
+    "andhra pradesh": "Andhra Pradesh"
+    kerala: "Kerala"
+    "madhya pradesh": "Madhya Pradesh"
+    punjab: "Punjab"
+    haryana: "Haryana"
+    bihar: "Bihar"
+    odisha: "Odisha"
+    assam: "Assam"
+    jharkhand: "Jharkhand"
+    chhattisgarh: "Chhattisgarh"
+    "himachal pradesh": "Himachal Pradesh"
+    uttarakhand: "Uttarakhand"
+    goa: "Goa"
+    manipur: "Manipur"
+    meghalaya: "Meghalaya"
+    tripura: "Tripura"
+    nagaland: "Nagaland"
+    "arunachal pradesh": "Arunachal Pradesh"
+    mizoram: "Mizoram"
+    sikkim: "Sikkim"
+    "jammu and kashmir": "Jammu and Kashmir"
+    ladakh: "Ladakh"
+  
+  # Energy metrics
+  energy_metrics:
+    - "energy"
+    - "power"
+    - "generation"
+    - "consumption"
+    - "demand"
+    - "load"
+    - "shortage"
+    - "outage"
+    - "drawal"
+    - "exchange"
+    - "transmission"
+  
+  # Aggregation keywords
+  aggregation_keywords:
+    - "maximum"
+    - "minimum"
+    - "average"
+    - "total"
+    - "sum"
+    - "max"
+    - "min"
+    - "avg"
+    - "highest"
+    - "lowest"
+    - "mean"
+    - "count"
+  
+  # Growth and trend keywords
+  growth_keywords:
+    - "growth"
+    - "increase"
+    - "decrease"
+    - "trend"
+    - "monthly growth"
+    - "quarterly growth"
+    - "yearly growth"
+  
+  # Comparison keywords
+  comparison_keywords:
+    - "compare"
+    - "versus"
+    - "vs"
+    - "against"
+    - "difference"
+    - "higher"
+    - "lower"
+  
+  # Month keywords
+  month_keywords:
+    january: 1
+    february: 2
+    march: 3
+    april: 4
+    may: 5
+    june: 6
+    july: 7
+    august: 8
+    september: 9
+    october: 10
+    november: 11
+    december: 12
+    jan: 1
+    feb: 2
+    mar: 3
+    apr: 4
+    may: 5
+    jun: 6
+    jul: 7
+    aug: 8
+    sep: 9
+    oct: 10
+    nov: 11
+    dec: 12
+
+# Prompt Templates
+prompt_templates:
+  sql_generation: |
+    Generate a SQLite SQL query for the following natural language question:
+    
+    Question: {question}
+    
+    Query Analysis:
+    - Type: {query_type}
+    - Intent: {intent}
+    - Entities: {entities}
+    - Time Period: {time_period}
+    
+    {schema_context}
+    
+    Generate only the SQL query, no explanations. Ensure the query is:
+    1. Syntactically correct for SQLite
+    2. Uses the correct tables and columns from the schema
+    3. Handles the specific intent and entities mentioned
+    4. Is safe to execute (read-only operations only)
+    
+    SQL Query:
+  
+  exchange_query: |
+    SELECT 
+        dc.CountryName,
+        dem.MechanismName,
+        fted.ExchangeValue,
+        fted.ExchangeDirection,
+        dt.Year,
+        dt.Month,
+        dt.DayOfMonth
+    FROM FactTransnationalExchangeDetail fted
+    JOIN DimCountries dc ON fted.CountryID = dc.CountryID
+    JOIN DimExchangeMechanisms dem ON fted.MechanismID = dem.MechanismID
+    JOIN DimDates dt ON fted.DateID = dt.DateID
+    WHERE {where_conditions}
+    ORDER BY fted.ExchangeValue DESC;
+  
+  clarification: |
+    I need more information to generate an accurate SQL query. Please clarify:
+    
+    {clarification_points}
+    
+    Please provide the missing information so I can generate the correct query.
+
+# Error Messages
+error_messages:
+  validation:
+    syntax_error: "The generated SQL has syntax errors"
+    schema_violation: "The query references non-existent tables or columns"
+    security_violation: "The query contains potentially dangerous operations"
+    sqlite_incompatibility: "The query uses features not supported in SQLite"
+  
+  generation:
+    low_confidence: "Unable to generate a confident SQL query"
+    no_candidates: "No valid SQL candidates were generated"
+    timeout: "SQL generation timed out"
+  
+  suggestions:
+    rephrase: "Try rephrasing your question"
+    check_entities: "Check if the entities mentioned exist in the database"
+    energy_focus: "Ensure your question is about energy data"
+    specific_date: "Provide specific dates or time periods"
+    state_region: "Specify which state or region you're interested in"
+
+# Performance Settings
+performance:
+  cache_ttl: 300  # 5 minutes
+  max_candidates: 5
+  timeout_seconds: 30
+  max_retries: 3 

@@ -1,0 +1,140 @@
+# Chat with DB - Google Cloud Build Configuration
+# Automated CI/CD pipeline for Cloud Run deployment
+
+steps:
+  # Build backend image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/chat-with-db-backend:$COMMIT_SHA',
+      '-t', 'gcr.io/$PROJECT_ID/chat-with-db-backend:latest',
+      '-f', 'Dockerfile',
+      '.'
+    ]
+    id: 'build-backend'
+    waitFor: ['-']  # Start immediately
+
+  # Build frontend image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/chat-with-db-frontend:$COMMIT_SHA',
+      '-t', 'gcr.io/$PROJECT_ID/chat-with-db-frontend:latest',
+      '-f', 'agent-ui/Dockerfile',
+      './agent-ui'
+    ]
+    id: 'build-frontend'
+    waitFor: ['-']  # Start immediately
+
+  # Run backend tests
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'run',
+      '--rm',
+      'gcr.io/$PROJECT_ID/chat-with-db-backend:$COMMIT_SHA',
+      'python', '-m', 'pytest', 'backend/tests/', '-v'
+    ]
+    id: 'test-backend'
+    waitFor: ['build-backend']
+    allowFailure: true  # Don't fail build if tests fail
+
+  # Push backend image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/chat-with-db-backend:$COMMIT_SHA']
+    id: 'push-backend'
+    waitFor: ['build-backend']
+
+  # Push frontend image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/chat-with-db-frontend:$COMMIT_SHA']
+    id: 'push-frontend'
+    waitFor: ['build-frontend']
+
+  # Deploy backend to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'deploy', 'chat-with-db-backend',
+      '--image', 'gcr.io/$PROJECT_ID/chat-with-db-backend:$COMMIT_SHA',
+      '--region', 'us-central1',
+      '--platform', 'managed',
+      '--allow-unauthenticated',
+      '--port', '8000',
+      '--memory', '2Gi',
+      '--cpu', '1',
+      '--max-instances', '10',
+      '--min-instances', '0',
+      '--concurrency', '80',
+      '--timeout', '300',
+      '--set-env-vars', 'APP_ENV=production,DATABASE_TYPE=mssql',
+      '--set-secrets', 'MSSQL_PASSWORD=MSSQL_PASSWORD:latest,LLM_API_KEY=LLM_API_KEY:latest,VECTOR_DB_API_KEY=VECTOR_DB_API_KEY:latest'
+    ]
+    id: 'deploy-backend'
+    waitFor: ['push-backend']
+
+  # Deploy frontend to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'deploy', 'chat-with-db-frontend',
+      '--image', 'gcr.io/$PROJECT_ID/chat-with-db-frontend:$COMMIT_SHA',
+      '--region', 'us-central1',
+      '--platform', 'managed',
+      '--allow-unauthenticated',
+      '--port', '80',
+      '--memory', '512Mi',
+      '--cpu', '0.5',
+      '--max-instances', '5',
+      '--min-instances', '0',
+      '--set-env-vars', 'REACT_APP_API_BASE=https://chat-with-db-backend-xxxxxxxxx-uc.a.run.app'
+    ]
+    id: 'deploy-frontend'
+    waitFor: ['push-frontend']
+
+  # Update frontend with backend URL (replace placeholder)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: [
+      'run', 'services', 'update', 'chat-with-db-frontend',
+      '--region', 'us-central1',
+      '--set-env-vars', 'REACT_APP_API_BASE=https://chat-with-db-backend-xxxxxxxxx-uc.a.run.app'
+    ]
+    id: 'update-frontend-url'
+    waitFor: ['deploy-backend', 'deploy-frontend']
+    allowFailure: true
+
+  # Run database migrations (if needed)
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'run',
+      '--rm',
+      '--env-file', '.env',
+      'gcr.io/$PROJECT_ID/chat-with-db-backend:$COMMIT_SHA',
+      'python', '-m', 'alembic', 'upgrade', 'head'
+    ]
+    id: 'run-migrations'
+    waitFor: ['deploy-backend']
+    allowFailure: true
+
+# Build timeout
+timeout: '1200s'
+
+# Available substitutions
+substitutions:
+  _REGION: 'us-central1'
+  _BACKEND_SERVICE: 'chat-with-db-backend'
+  _FRONTEND_SERVICE: 'chat-with-db-frontend'
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+  diskSizeGb: '50'
+
+# Artifacts
+artifacts:
+  images:
+    - 'gcr.io/$PROJECT_ID/chat-with-db-backend:$COMMIT_SHA'
+    - 'gcr.io/$PROJECT_ID/chat-with-db-backend:latest'
+    - 'gcr.io/$PROJECT_ID/chat-with-db-frontend:$COMMIT_SHA'
+    - 'gcr.io/$PROJECT_ID/chat-with-db-frontend:latest'

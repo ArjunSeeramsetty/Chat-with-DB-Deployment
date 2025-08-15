@@ -1,0 +1,165 @@
+# Chat with DB - Cloud Production Docker Compose
+# Use this for production deployments with external services
+
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chat-with-db-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Database Configuration
+      - DATABASE_TYPE=mssql
+      - MSSQL_SERVER=${MSSQL_SERVER}
+      - MSSQL_DATABASE=${MSSQL_DATABASE}
+      - MSSQL_USERNAME=${MSSQL_USERNAME}
+      - MSSQL_PASSWORD=${MSSQL_PASSWORD}
+      - MSSQL_PORT=${MSSQL_PORT:-1433}
+      - MSSQL_TIMEOUT=${MSSQL_TIMEOUT:-30}
+      
+      # API Configuration
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_BASE_URL=${API_BASE_URL}
+      
+      # Frontend Configuration
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      
+      # Environment
+      - APP_ENV=${APP_ENV:-production}
+      - DEBUG=${DEBUG:-false}
+      
+      # LLM Configuration
+      - LLM_PROVIDER_TYPE=${LLM_PROVIDER_TYPE}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      
+      # Vector Database
+      - VECTOR_DB_TYPE=${VECTOR_DB_TYPE}
+      - VECTOR_DB_URL=${VECTOR_DB_URL}
+      - VECTOR_DB_API_KEY=${VECTOR_DB_API_KEY}
+      
+      # Logging and Monitoring
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENABLE_STRUCTURED_LOGGING=${ENABLE_STRUCTURED_LOGGING:-true}
+      - ENABLE_PROMETHEUS=${ENABLE_PROMETHEUS:-true}
+      
+      # Performance
+      - SQL_TIMEOUT=${SQL_TIMEOUT:-30}
+      - MAX_ROWS=${MAX_ROWS:-1000}
+      - ENABLE_SQL_VALIDATION=${ENABLE_SQL_VALIDATION:-true}
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  frontend:
+    build:
+      context: ./agent-ui
+      dockerfile: Dockerfile
+    container_name: chat-with-db-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      - REACT_APP_API_BASE=${REACT_APP_API_BASE:-http://localhost:8000}
+    depends_on:
+      - backend
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+  # Optional: Qdrant Vector Database (if not using cloud service)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: chat-with-db-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+
+  # Optional: Redis for caching (if needed)
+  redis:
+    image: redis:7-alpine
+    container_name: chat-with-db-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+
+  # Nginx reverse proxy (optional, for custom domains)
+  nginx:
+    image: nginx:alpine
+    container_name: chat-with-db-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro  # Mount SSL certificates
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  qdrant_storage:
+    driver: local
+  redis_data:
+    driver: local
