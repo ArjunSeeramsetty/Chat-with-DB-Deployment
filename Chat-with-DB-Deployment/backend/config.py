@@ -12,8 +12,8 @@ class Settings(BaseSettings):
     """Application settings"""
 
     # Database Configuration
-    database_type: str = "mssql"  # "sqlite", "mssql", "postgresql"
-    database_path: str = "C:/Users/arjun/Desktop/PSPreport/power_data.db"  # For SQLite fallback
+    database_type: str = "sqlite"  # "sqlite", "mssql", "postgresql"
+    database_path: str = "/app/data/power_data.db"  # For SQLite fallback, overridden by DATABASE_PATH env var
     
     # Azure SQL Server Configuration (when database_type = "mssql")
     mssql_server: Optional[str] = None

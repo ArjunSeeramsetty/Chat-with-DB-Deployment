@@ -97,12 +97,35 @@ npm start
 - ✅ **Real-time Data**: Live updates from backend
 - ✅ **Responsive Design**: Works on all devices
 
-## 📊 **Database Configuration**
+## 🚀 **Deployment Configuration**
 
-The system uses the database from:
-- **Database Path**: `C:/Users/arjun/Desktop/PSPreport/power_data.db`
-- **Configuration**: Set in `backend/config.py`
-- **Access**: Direct file path access (no local copy needed)
+This application is configured for deployment using Docker and can be easily run on cloud platforms like Google Cloud Platform (GCP).
+
+### **Environment Variables**
+
+The following environment variables are used to configure the application:
+
+#### **Backend (FastAPI)**
+-   `DATABASE_PATH`: The path to the SQLite database file *inside the container*. Defaults to `/app/data/power_data.db`. This can be overridden to point to a different location if needed.
+-   `DATABASE_TYPE`: The type of database to use. Defaults to `sqlite`. Can be set to `mssql` to use an Azure SQL database (requires additional MSSQL environment variables to be set).
+
+#### **Frontend (React)**
+-   `API_BASE_URL`: The URL of the backend API. This is injected at runtime into the frontend container. It should be the public URL of the deployed backend service.
+
+### **Database Setup (for SQLite)**
+
+For local development and containerized deployments using SQLite, you must provide the `power_data.db` file.
+1.  Create a directory named `data` in the `Chat-with-DB-Deployment` directory.
+2.  Place your `power_data.db` file inside this `data` directory.
+
+The structure should be:
+```
+Chat-with-DB-Deployment/
+├── data/
+│   └── power_data.db
+└── ...
+```
+The backend Dockerfile is configured to copy this file into the image.
 
 ### **Database Schema:**
 - **FactStateDailyEnergy**: State-level daily energy data
@@ -187,5 +210,3 @@ The system successfully:
 ---
 
 **Status**: ✅ **Production Ready** - System is fully functional with direct SQL generation and intelligent clarification handling.
-
-**Database**: Uses external database from `C:/Users/arjun/Desktop/PSPreport/power_data.db` 
