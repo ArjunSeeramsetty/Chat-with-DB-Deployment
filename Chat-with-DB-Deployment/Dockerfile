@@ -56,6 +56,12 @@ WORKDIR /app
 # Copy Python packages from builder stage
 COPY --from=builder /root/.local /home/app/.local
 
+# Create data directory and copy database file
+# IMPORTANT: The 'power_data.db' file must be placed in a 'data' directory
+# inside the 'Chat-with-DB-Deployment' directory before building the image.
+RUN mkdir -p /app/data
+COPY data/power_data.db /app/data/power_data.db
+
 # Copy application code
 COPY backend/ ./backend/
 COPY start_backend.py .

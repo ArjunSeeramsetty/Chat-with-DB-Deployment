@@ -52,8 +52,8 @@ const useQueryService = (dispatch, state) => {
         console.log("state.clarificationAnswer:", state.clarificationAnswer);
       }
       
-      // Get API base URL from environment or use default
-      const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:8000";
+      // Get API base URL from runtime config or use default
+      const apiBaseUrl = window.API_BASE_URL || "http://localhost:8000";
       
       // Resolve endpoint based on UI selection
       const endpointKey = state.selectedEndpoint || 'ask';
@@ -178,8 +178,8 @@ const useQueryService = (dispatch, state) => {
 
   const checkBackendHealth = useCallback(async () => {
     try {
-      // Get API base URL from environment or use default
-      const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:8000";
+      // Get API base URL from runtime config or use default
+      const apiBaseUrl = window.API_BASE_URL || "http://localhost:8000";
       
       const response = await fetch(`${apiBaseUrl}/api/v1/health`, {
         method: "GET",
