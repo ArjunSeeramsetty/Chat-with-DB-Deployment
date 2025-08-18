@@ -1,0 +1,6 @@
+# Test Scripts Requirements
+requests>=2.31.0
+asyncio
+time
+json
+typing

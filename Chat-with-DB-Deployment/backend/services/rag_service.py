@@ -38,14 +38,14 @@ class EnhancedRAGService:
     """
     Enhanced RAG service with LLM integration hooks for improved SQL generation
     """
-    
+
     def __init__(self, db_path: str, llm_provider=None, memory_service=None):
         self.db_path = db_path
         self.memory_service = memory_service
-        
+
         # Load settings
         self.settings = get_settings()
-        
+
         # Initialize LLM provider
         if llm_provider:
             self.llm_provider = llm_provider
@@ -56,7 +56,7 @@ class EnhancedRAGService:
                 model=self.settings.llm_model,
                 base_url=self.settings.llm_base_url,
             )
-        
+
         # Initialize components
         self.intent_analyzer = IntentAnalyzer()
         self.sql_assembler = SQLAssembler(llm_provider=self.llm_provider)
@@ -64,12 +64,12 @@ class EnhancedRAGService:
         self.sql_executor = SQLExecutor(db_path)
         self.async_sql_executor = AsyncSQLExecutor(db_path)
         self.sql_sandbox = SQLSandbox(db_path)
-        
+
         # Initialize cache attributes first
         self._schema_cache: Optional[Dict[str, List[str]]] = None
         self._schema_cache_time: float = 0
         self._cache_ttl = self.settings.memory_cache_ttl  # Use configurable TTL
-        
+
         # Initialize enhanced components
         self.schema_info = self._get_schema_info()
         # Sprint 5: Use enhanced SQL validator with auto-repair and guard-rails
@@ -85,14 +85,14 @@ class EnhancedRAGService:
             schema_info_dict, db_path, llm_provider=self.llm_provider
         )
         self.candidate_ranker = CandidateRanker(schema_info_dict)
-        
+
     async def process_query(self, request: QueryRequest) -> QueryResponse:
         """
         Process a natural language query through the complete pipeline
-        
+
         Args:
             request: QueryRequest with question and metadata
-            
+
         Returns:
             QueryResponse with results and metadata
         """
@@ -100,12 +100,12 @@ class EnhancedRAGService:
         correlation_id = (
             request.correlation_id if hasattr(request, "correlation_id") else None
         )
-        
+
         try:
             logger.info(
                 f"Starting query processing - Question: {request.question[:100]} - User: {request.user_id} - Mode: {request.processing_mode.value} - Clarification attempts: {request.clarification_attempt_count}"
             )
-            
+
             # Check if we've exceeded the maximum clarification attempts
             if request.clarification_attempt_count >= 2:
                 response = QueryResponse(
@@ -122,7 +122,7 @@ class EnhancedRAGService:
                     clarification_attempt_count=request.clarification_attempt_count,
                 )
                 return response
-            
+
             # Check if clarification answers are provided
             if request.clarification_answers and len(request.clarification_answers) > 0:
                 logger.info(
@@ -137,7 +137,7 @@ class EnhancedRAGService:
                 logger.info(f"Enhanced question: {enhanced_question}")
             else:
                 enhanced_question = request.question
-            
+
             # === LLM Hook #1 – "Paraphrase & Disambiguate" ===
             # Temporarily disabled to test date parsing
             rewritten_question = enhanced_question
@@ -150,7 +150,7 @@ class EnhancedRAGService:
             #             original_words = set(request.question.lower().split())
             #             rewritten_words = set(llm_response.content.lower().split())
             #             similarity = len(original_words.intersection(rewritten_words)) / len(original_words.union(rewritten_words))
-            #             
+            #
             #             if similarity < 0.7:  # Only use if significantly different
             #                 rewritten_question = llm_response.content
             #                 logger.info(f"LLM Hook #1 Rewritten Question: {rewritten_question}")
@@ -159,12 +159,12 @@ class EnhancedRAGService:
             #     except Exception as e:
             #         logger.warning(f"LLM Hook #1 (Paraphrase) failed: {e}")
             #         rewritten_question = request.question  # Fallback to original
-            
+
             # Use the rewritten question for intent analysis
             query_analysis = await self.intent_analyzer.analyze_intent(
                 rewritten_question, self.llm_provider
             )
-            
+
             # Re-extract entities from the original question to preserve accuracy
             original_entities = self.intent_analyzer._extract_entities(request.question)
             query_analysis.entities = original_entities
@@ -176,7 +176,7 @@ class EnhancedRAGService:
             logger.info(
                 f"Intent analysis completed - Type: {query_analysis.query_type.value}, Intent: {query_analysis.intent.value}, Confidence: {query_analysis.confidence}"
             )
-            
+
             # Step 2: Build Context
             context_info = self._build_context(
                 rewritten_question, query_analysis, request.user_id
@@ -184,12 +184,12 @@ class EnhancedRAGService:
             logger.info(
                 f"Context built - User mappings: {len(context_info.user_mappings)}, Dimension values: {len(context_info.dimension_values)}"
             )
-            
+
             # Step 3: Generate SQL
             sql_result = await self._generate_sql_or_request_clarification(
                 rewritten_question, query_analysis, request
             )
-            
+
             # Check if clarification is needed
             if (
                 hasattr(sql_result, "clarification_question")
@@ -217,7 +217,7 @@ class EnhancedRAGService:
                 )
                 logger.info(f"Response object: {response}")
                 return response
-            
+
             # === LLM Hook #6 – "Contextual Clarifier" ===
             if not sql_result.success or (
                 sql_result.confidence is not None and sql_result.confidence < 0.6
@@ -244,7 +244,7 @@ class EnhancedRAGService:
                             if detected_info
                             else "No specific entities or time periods detected."
                         )
-                        
+
                         clarification_prompt = f"""You are helping clarify a database query about energy data. 
 
 ORIGINAL QUERY: "{request.question}"
@@ -271,7 +271,7 @@ EXAMPLES OF BAD CLARIFICATION QUESTIONS:
 - "Here's a clarification question: Do you want..." (includes explanatory text)
 
 Generate ONLY the clarification question, no explanations or additional text:"""
-                        
+
                         llm_response = await self.llm_provider.generate(
                             clarification_prompt
                         )
@@ -288,7 +288,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                             logger.info(
                                 f"LLM Hook #6: Generated clarification question: {clarification_question}"
                             )
-                            
+
                             response = QueryResponse(
                                 success=False,
                                 error="Query needs clarification",
@@ -311,7 +311,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                             return response
                     except Exception as e:
                         logger.warning(f"LLM Hook #6 (Clarification) failed: {e}")
-                
+
                 # If LLM clarification fails, return generic clarification request
                 response = QueryResponse(
                     success=False,
@@ -330,7 +330,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     f"Generated clarification response with attempt count: {response.clarification_attempt_count}"
                 )
                 return response
-            
+
             if not sql_result.success:
                 # No fallback SQL generation - ask for clarification instead
                 # Build contextual clarification prompt
@@ -353,7 +353,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     if detected_info
                     else "No specific entities or time periods detected."
                 )
-                
+
                 clarification_prompt = f"""You are helping clarify a database query about energy data. 
 
 ORIGINAL QUERY: "{request.question}"
@@ -380,7 +380,7 @@ EXAMPLES OF BAD CLARIFICATION QUESTIONS:
 - "Here's a clarification question: Do you want..." (includes explanatory text)
 
 Generate ONLY the clarification question, no explanations or additional text:"""
-                
+
                 if self.llm_provider:
                     try:
                         llm_response = await self.llm_provider.generate(
@@ -399,7 +399,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                         clarification_question = "I need more specific information about your query. Could you please clarify the date, metric, or geographical area you're interested in?"
                 else:
                     clarification_question = "I need more specific information about your query. Could you please clarify the date, metric, or geographical area you're interested in?"
-                
+
                 response = QueryResponse(
                     success=False,
                     error="Clarification required",
@@ -416,7 +416,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     f"Generated clarification response with attempt count: {response.clarification_attempt_count}"
                 )
                 return response
-            
+
             # Step 4: Execute SQL
             logger.info(f"Executing SQL: {sql_result.sql[:200]}...")
 
@@ -438,7 +438,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             logger.info(
                 f"SQL execution result: success={execution_result.success}, row_count={execution_result.row_count}, error={execution_result.error}"
             )
-            
+
             if not execution_result.success:
                 logger.error(f"SQL execution failed: {execution_result.error}")
                 response = QueryResponse(
@@ -453,19 +453,19 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     api_calls=self._count_api_calls(request.processing_mode, None),
                 )
                 return response
-            
+
             # Step 5: Generate Visualization
             visualization = None
             if execution_result.row_count > 0:
                 visualization = self._generate_visualization(
                     execution_result.data, request.question
                 )
-            
+
             # Step 6: Generate Suggestions
             suggestions = self._generate_suggestions(
                 request.question, execution_result.data, query_analysis
             )
-            
+
             # === LLM Hook #7 – "NL Result Narration" ===
             summary = "Query executed successfully."  # Default summary
             if (
@@ -481,7 +481,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                         logger.info(f"LLM Hook #7: Generated result narration.")
                 except Exception as e:
                     logger.warning(f"LLM Hook #7 (Narration) failed: {e}")
-            
+
             # Step 7: Build Response
             response = QueryResponse(
                 success=True,
@@ -509,12 +509,12 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 confidence=sql_result.confidence,  # Include confidence score
                 clarification_attempt_count=request.clarification_attempt_count,
             )
-            
+
             logger.info(
                 f"Query processing completed successfully - Rows: {execution_result.row_count}, Time: {response.processing_time:.3f}s"
             )
             return response
-            
+
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}", exc_info=True)
             response = QueryResponse(
@@ -528,18 +528,18 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 api_calls=0,
             )
             return response
-    
+
     def _build_context(
         self, query: str, query_analysis: QueryAnalysis, user_id: str
     ) -> ContextInfo:
         """Build context information for SQL generation"""
-        
+
         # Get dimension values
         dimension_values = self._get_dimension_values()
-        
+
         # Map user references to dimension values
         user_mappings = self._map_user_references(query, dimension_values)
-        
+
         # Get memory context
         memory_context = None
         if self.memory_service:
@@ -549,10 +549,10 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 )
             except Exception as e:
                 logger.warning(f"Failed to get memory context: {str(e)}")
-        
+
         # Get schema info
         schema_info = self._get_schema_info()
-        
+
         # Create context with LLM provider for hooks
         context = ContextInfo(
             query_analysis=query_analysis,
@@ -563,12 +563,12 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             relevant_examples=[],
             schema_linker=self.schema_linker,  # Pass schema linker for business rules access
         )
-        
+
         # Add LLM provider to context for hooks
         context.llm_provider = self.llm_provider
-        
+
         return context
-    
+
     async def _generate_sql_or_request_clarification(
         self, query: str, analysis: QueryAnalysis, request: QueryRequest
     ) -> SQLGenerationResult:
@@ -577,7 +577,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
         """
         try:
             query_lower = query.lower()
-            
+
             # Enhanced trend analysis handling - covers both growth and aggregation queries
             is_trend_analysis = analysis.intent.value == "trend_analysis"
 
@@ -607,7 +607,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 "energy met in 2024",
                 "energy met in 2025",
             ]
-            
+
             if any(pattern in query_lower for pattern in clear_patterns):
                 logger.info(
                     f"Clear query pattern detected, trying direct SQL generation"
@@ -622,12 +622,12 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                         confidence=0.9,
                         clarification_question=None,
                     )
-            
+
             # Calculate confidence
             confidence = self.sql_assembler._calculate_query_confidence(query, analysis)
             print(f"🔍 CONFIDENCE CALCULATION: {confidence:.3f} for query: '{query}'")
             logger.info(f"Query confidence: {confidence:.3f}")
-            
+
             # For high confidence queries, try direct SQL generation
             if confidence >= 0.4:
                 print(
@@ -647,7 +647,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                         confidence=confidence,
                         clarification_question=None,
                     )
-            
+
             # If we have clarification answers, try direct SQL generation
             if (
                 hasattr(request, "clarification_answers")
@@ -657,7 +657,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     query, request.clarification_answers
                 )
                 logger.info(f"Enhanced query with clarifications: {enhanced_query}")
-                
+
                 # Try direct SQL generation with enhanced query
                 direct_sql = self._generate_direct_sql(enhanced_query, analysis)
                 if direct_sql:
@@ -669,10 +669,10 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                         confidence=0.8,
                         clarification_question=None,
                     )
-            
+
             # Fallback to template-based generation
             sql_result = await self._generate_sql_with_templates(query, analysis)
-            
+
             # === LLM Hook #6 – "Contextual Clarifier" ===
             # Check if we need clarification based on confidence or SQL generation failure
             if not sql_result.success or (
@@ -747,16 +747,16 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                                 f"LLM Hook #6: Generated clarification question: {clarification_question}"
                             )
 
-                    return SQLGenerationResult(
-                        success=False,
-                        sql="",
+                            return SQLGenerationResult(
+                                success=False,
+                                sql="",
                                 error="Query needs clarification",
-                        confidence=confidence,
+                                confidence=confidence,
                                 clarification_question=clarification_question,
-                    )
+                            )
                     except Exception as e:
                         logger.warning(f"LLM Hook #6 (Clarification) failed: {e}")
-                
+
                 # If LLM clarification fails, return generic clarification request
                 return SQLGenerationResult(
                     success=False,
@@ -765,7 +765,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     confidence=confidence,
                     clarification_question="I need more specific information about your query. Could you please clarify the date, metric, or geographical area you're interested in?",
                 )
-            
+
             # If we have a valid SQL but low confidence, return it anyway
             logger.info(f"Returning SQL despite low confidence ({confidence:.3f})")
             return SQLGenerationResult(
@@ -775,7 +775,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 confidence=confidence,
                 clarification_question=None,
             )
-            
+
         except Exception as e:
             logger.error(f"Error in SQL generation: {str(e)}")
             return SQLGenerationResult(
@@ -967,7 +967,7 @@ Provide your final recommendation in this exact JSON format. Do not include any 
         except Exception as e:
             logger.error(f"Error in AI visualization analysis: {e}")
             return None
-        
+
     def _prepare_data_summary(
         self, headers: List[str], data: List[Dict[str, Any]]
     ) -> str:
@@ -1240,7 +1240,7 @@ Sample Data (first 3 rows):
                     confidence=0.9,
                     reasoning="Multi-line chart for monthly data with multiple entities",
                 )
-            
+
             # Determine chart type based on data characteristics
             if len(data) == 1:
                 # Single row - use bar chart for single value display
@@ -1311,7 +1311,7 @@ Sample Data (first 3 rows):
                     )
                     for header in headers
                 )
-                
+
                 if is_time_series:
                     # Regular time series
                     config = {
@@ -1334,7 +1334,7 @@ Sample Data (first 3 rows):
                         "dataType": "categorical",
                     }
                     chart_type = "bar"
-                
+
                 logger.info(f"Generated large dataset chart config: {config}")
                 return VisualizationRecommendation(
                     chart_type=chart_type,
@@ -1342,19 +1342,19 @@ Sample Data (first 3 rows):
                     confidence=0.6,
                     reasoning=f"{chart_type.title()} chart for large dataset",
                 )
-            
+
             return None
-            
+
         except Exception as e:
             logger.warning(f"Fallback visualization generation failed: {str(e)}")
             return None
-    
+
     def _generate_suggestions(
         self, query: str, data: List[Dict[str, Any]], query_analysis: QueryAnalysis
     ) -> List[str]:
         """Generate follow-up suggestions"""
         suggestions = []
-        
+
         try:
             # Add suggestions based on query type
             if query_analysis.query_type == QueryType.STATE:
@@ -1366,29 +1366,29 @@ Sample Data (first 3 rows):
             elif query_analysis.query_type == QueryType.GENERATION:
                 suggestions.append("Show generation mix")
                 suggestions.append("Compare generation sources")
-            
+
             # Add general suggestions
             suggestions.append("Show maximum values")
             suggestions.append("Show average values")
-            
+
         except Exception as e:
             logger.warning(f"Suggestion generation failed: {str(e)}")
-        
+
         return suggestions[:5]  # Limit to 5 suggestions
-    
+
     def _format_table_data(self, execution_result: ExecutionResult) -> Dict[str, Any]:
         """Format data for frontend table display"""
         if not execution_result.data:
             return {"headers": [], "rows": [], "chartData": []}
-        
+
         headers = list(execution_result.data[0].keys())
         rows = [
             [row.get(header, "") for header in headers] for row in execution_result.data
         ]
-        
+
         # Include chartData for frontend charts
         chartData = execution_result.data
-        
+
         return {"headers": headers, "rows": rows, "chartData": chartData}
 
     def _count_api_calls(
@@ -1398,21 +1398,21 @@ Sample Data (first 3 rows):
     ) -> int:
         """Count API calls based on processing mode"""
         base_calls = 1  # SQL generation
-        
+
         if processing_mode == ProcessingMode.COMPREHENSIVE:
             base_calls += 1  # Intent analysis
-        
+
         if visualization:
             base_calls += 1  # Visualization generation
-        
+
         return base_calls
-    
+
     def _get_dimension_values(self) -> Dict[str, List[Any]]:
         """Get dimension table values"""
         # This would be implemented to fetch from database
         # For now, return empty dict
         return {}
-    
+
     def _map_user_references(
         self, query: str, dimension_values: Dict[str, List[Any]]
     ) -> List[Any]:
@@ -1420,7 +1420,7 @@ Sample Data (first 3 rows):
         # This would be implemented to map user terms to database entities
         # For now, return empty list
         return []
-    
+
     async def _get_schema_info_async(self) -> Optional[Any]:
         """Get cached schema information using async execution"""
         current_time = time.time()
@@ -1445,19 +1445,19 @@ Sample Data (first 3 rows):
     def _get_schema_info(self) -> Optional[Any]:
         """Get cached schema information (synchronous fallback)"""
         current_time = time.time()
-        
+
         if (
             self._schema_cache is None
             or current_time - self._schema_cache_time > self._cache_ttl
         ):
-            
+
             try:
                 self._schema_cache = self.sql_executor.get_schema_info()
                 self._schema_cache_time = current_time
             except Exception as e:
                 logger.warning(f"Failed to get schema info: {str(e)}")
                 return None
-        
+
         return self._schema_cache
 
     def _get_gpu_status(self) -> Dict[str, Any]:
@@ -1473,62 +1473,62 @@ Sample Data (first 3 rows):
                 else "unknown"
             ),
         }
-    
+
     def _clean_clarification_question(self, question: str) -> str:
         """
         Clean up clarification questions by removing quotes and extra formatting.
-        
+
         Args:
             question: Raw clarification question from LLM
-            
+
         Returns:
             Cleaned clarification question
         """
         if not question:
             return question
-        
+
         # Remove surrounding quotes
         question = question.strip()
         if question.startswith('"') and question.endswith('"'):
             question = question[1:-1]
         elif question.startswith("'") and question.endswith("'"):
             question = question[1:-1]
-        
+
         # Remove any explanatory text that might come after the question
         if "\n" in question:
             question = question.split("\n")[0]
-        
+
         # Remove any trailing punctuation that might be part of the explanation
         question = question.rstrip(".")
-        
+
         return question.strip()
-    
+
     def _generate_schema_based_clarification(
         self, query: str, analysis: QueryAnalysis
     ) -> str:
         """
         Generate a clarification question based on available schema columns.
         This is used as a fallback when the LLM generates invalid questions.
-        
+
         Args:
             query: The original user query
             analysis: The query analysis
-            
+
         Returns:
             A schema-based clarification question
         """
         schema_columns = self._get_available_schema_columns()
-        
+
         # Extract key terms from the query
         query_lower = query.lower()
         geographic_level = self._get_geographic_level_for_query(query_lower)
-        
+
         # Determine what type of clarification is needed based on the query
         if "maximum" in query_lower and (
             "energy" in query_lower or "consumption" in query_lower
         ):
             return f"Do you want EnergyMet (energy actually supplied) or MaximumDemand (peak demand capacity) for all {geographic_level} in 2025?"
-        
+
         elif "demand" in query_lower:
             # Check for demand-related columns
             demand_columns = []
@@ -1536,12 +1536,12 @@ Sample Data (first 3 rows):
                 for col in columns:
                     if "demand" in col.lower():
                         demand_columns.append(col)
-            
+
             if len(demand_columns) >= 2:
                 return f"Do you want {demand_columns[0]} or {demand_columns[1]} for all {geographic_level} in 2025?"
             else:
                 return f"Do you want DemandMet (actual demand met) or MaximumDemand (peak demand capacity) for all {geographic_level} in 2025?"
-        
+
         elif "outage" in query_lower:
             # Check for outage-related columns
             outage_columns = []
@@ -1549,14 +1549,14 @@ Sample Data (first 3 rows):
                 for col in columns:
                     if "outage" in col.lower():
                         outage_columns.append(col)
-            
+
             if len(outage_columns) >= 3:
                 return f"Do you want {outage_columns[0]}, {outage_columns[1]}, or {outage_columns[2]} for all {geographic_level} in 2025?"
             elif len(outage_columns) >= 2:
                 return f"Do you want {outage_columns[0]} or {outage_columns[1]} for all {geographic_level} in 2025?"
             else:
                 return f"Do you want CentralSectorOutage, StateSectorOutage, or PrivateSectorOutage for all {geographic_level} in 2025?"
-        
+
         elif "shortage" in query_lower:
             # Check for shortage-related columns
             shortage_columns = []
@@ -1564,12 +1564,12 @@ Sample Data (first 3 rows):
                 for col in columns:
                     if "shortage" in col.lower():
                         shortage_columns.append(col)
-            
+
             if len(shortage_columns) >= 2:
                 return f"Do you want {shortage_columns[0]} or {shortage_columns[1]} for all {geographic_level} in 2025?"
             else:
                 return f"Do you want EnergyShortage (energy not supplied) or PowerShortage (power not supplied) for all {geographic_level} in 2025?"
-        
+
         elif "generation" in query_lower:
             # Check for generation-related columns
             generation_columns = []
@@ -1577,15 +1577,15 @@ Sample Data (first 3 rows):
                 for col in columns:
                     if "generation" in col.lower():
                         generation_columns.append(col)
-            
+
             if len(generation_columns) >= 2:
                 return f"Do you want {generation_columns[0]} or {generation_columns[1]} for all {geographic_level} in 2025?"
             else:
                 return f"Do you want TotalGeneration or ThermalGeneration for all {geographic_level} in 2025?"
-        
+
         elif "energy" in query_lower:
             return f"Do you want EnergyShortage (energy not supplied) or EnergyMet (energy actually supplied) for all {geographic_level} in 2025?"
-        
+
         else:
             # Generic fallback
             return f"Do you want EnergyShortage (energy not supplied) or EnergyMet (energy actually supplied) for all {geographic_level} in 2025?"
@@ -1593,28 +1593,28 @@ Sample Data (first 3 rows):
     def _validate_clarification_question(self, question: str) -> bool:
         """
         Validate that a clarification question only refers to valid schema terms.
-        
+
         Args:
             question: The clarification question to validate
-            
+
         Returns:
             True if the question is valid, False otherwise
         """
         if not question:
             return False
-        
+
         # Get available schema columns
         schema_columns = self._get_available_schema_columns()
         all_valid_terms = []
         for table, columns in schema_columns.items():
             all_valid_terms.extend(columns)
-        
+
         # Check if the question contains any valid schema terms
         question_lower = question.lower()
         for term in all_valid_terms:
             if term.lower() in question_lower:
                 return True
-        
+
         # If no schema terms found, the question is invalid
         return False
 
@@ -1624,24 +1624,24 @@ Sample Data (first 3 rows):
         """
         Enhance the original question with clarification answers to make it more specific.
         This method preserves the original context while integrating clarification information.
-        
+
         Args:
             original_question: The original user question
             clarification_answers: Dictionary of clarification questions and their answers
-            
+
         Returns:
             Enhanced question with clarification context
         """
         if not clarification_answers:
             return original_question
-        
+
         # Build enhancement context from clarification answers
         enhancement_parts = []
-        
+
         for question, answer in clarification_answers.items():
             # Extract key information from the clarification answer
             answer_lower = answer.lower()
-            
+
             # Handle specific metric clarifications
             if (
                 "energyshortage" in answer_lower
@@ -1688,7 +1688,7 @@ Sample Data (first 3 rows):
                 or "private sector" in answer_lower
             ):
                 enhancement_parts.append("PrivateSectorOutage")
-            
+
             # Handle time granularity clarifications
             if "monthly" in answer_lower or "each month" in answer_lower:
                 enhancement_parts.append("monthly data")
@@ -1700,7 +1700,7 @@ Sample Data (first 3 rows):
                 or "entire year" in answer_lower
             ):
                 enhancement_parts.append("yearly data")
-            
+
             # Handle aggregation clarifications
             if "maximum" in answer_lower or "max" in answer_lower:
                 enhancement_parts.append("maximum values")
@@ -1710,7 +1710,7 @@ Sample Data (first 3 rows):
                 enhancement_parts.append("average values")
             elif "total" in answer_lower or "sum" in answer_lower:
                 enhancement_parts.append("total values")
-            
+
             # Handle geographic clarifications
             if "all states" in answer_lower or "every state" in answer_lower:
                 enhancement_parts.append("all states")
@@ -1718,7 +1718,7 @@ Sample Data (first 3 rows):
                 enhancement_parts.append("all regions")
             elif "individual" in answer_lower or "each" in answer_lower:
                 enhancement_parts.append("individual values")
-        
+
         if enhancement_parts:
             # Create a more natural enhanced question that preserves original context
             enhanced_question = (
@@ -1726,36 +1726,36 @@ Sample Data (first 3 rows):
             )
             logger.info(f"Enhanced question with clarification: {enhanced_question}")
             return enhanced_question
-        
+
         return original_question
 
     def _get_available_schema_columns(self) -> Dict[str, List[str]]:
         """
         Get available columns from the database schema.
-        
+
         Returns:
             Dictionary mapping table names to lists of column names
         """
         schema_info = self._get_schema_info()
         if not schema_info:
             return {}
-        
+
         schema_columns = {}
         for table_name, table_info in schema_info.items():
             if "columns" in table_info:
                 schema_columns[table_name] = table_info["columns"]
-        
+
         return schema_columns
 
     def _get_schema_constraints_for_clarification(self) -> str:
         """
         Get schema constraints for clarification questions.
-        
+
         Returns:
             Formatted string of available schema columns with geographic context
         """
         schema_columns = self._get_available_schema_columns()
-        
+
         constraints = []
         for table, columns in schema_columns.items():
             # Add geographic context based on table name
@@ -1767,7 +1767,7 @@ Sample Data (first 3 rows):
                 constraints.append(f"{table} (REGION level data): {', '.join(columns)}")
             else:
                 constraints.append(f"{table}: {', '.join(columns)}")
-        
+
         return "\n".join(constraints)
 
     def _build_contextual_clarification_prompt(
@@ -1778,12 +1778,12 @@ Sample Data (first 3 rows):
     ) -> str:
         """
         Build a contextual clarification prompt that includes previous clarification answers.
-        
+
         Args:
             query: The original user query
             analysis: The query analysis
             clarification_answers: Previous clarification answers
-            
+
         Returns:
             Formatted clarification prompt
         """
@@ -1796,7 +1796,7 @@ Sample Data (first 3 rows):
             previous_context = (
                 f"\nPREVIOUS CLARIFICATIONS:\n" + "\n".join(context_parts) + "\n"
             )
-        
+
         # Build detected context
         detected_info = []
         if analysis.entities:
@@ -1805,22 +1805,22 @@ Sample Data (first 3 rows):
             detected_info.append(f"Detected time period: {analysis.time_period}")
         if analysis.query_type:
             detected_info.append(f"Query type: {analysis.query_type.value}")
-        
+
         detected_context = (
             "\n".join(detected_info)
             if detected_info
             else "No specific entities or time periods detected."
         )
-        
+
         # Get schema constraints
         schema_constraints = self._get_schema_constraints_for_clarification()
-        
+
         # Generate context-specific examples based on query analysis
         query_lower = query.lower()
         context_specific_examples = self._get_context_specific_examples(
             query_lower, analysis
         )
-        
+
         prompt = f"""You are helping clarify a database query about INDIAN energy data.
 
 ORIGINAL QUERY: "{query}"{previous_context}
@@ -1851,24 +1851,24 @@ CRITICAL INSTRUCTIONS:
 14. NEVER ask about US states, regions, or non-Indian geography
 
 Generate ONLY the clarification question, no explanations or additional text:"""
-        
+
         return prompt
 
     def _is_similar_question(self, question1: str, question2: str) -> bool:
         """
         Check if two clarification questions are too similar.
-        
+
         Args:
             question1: First clarification question
             question2: Second clarification question
-            
+
         Returns:
             True if questions are similar, False otherwise
         """
         # Normalize questions for comparison
         q1_lower = question1.lower().strip()
         q2_lower = question2.lower().strip()
-        
+
         # Remove common prefixes and suffixes
         q1_clean = (
             q1_lower.replace("do you want", "")
@@ -1884,36 +1884,36 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             .replace("for 2025", "")
             .strip()
         )
-        
+
         # Check if the core question is the same
         if q1_clean == q2_clean:
             logger.info(f"Exact match found: {q1_clean}")
             return True
-        
+
         # Check if they contain the same key terms
         q1_words = set(q1_clean.split())
         q2_words = set(q2_clean.split())
-        
+
         # If more than 70% of words are the same, consider them similar
         intersection = q1_words.intersection(q2_words)
         union = q1_words.union(q2_words)
-        
+
         if len(union) > 0:
             similarity = len(intersection) / len(union)
             logger.info(
                 f"Similarity score: {similarity:.2f} between '{q1_clean}' and '{q2_clean}'"
             )
             return similarity > 0.7
-        
+
         return False
 
     def _get_geographic_level_for_query(self, query_lower: str) -> str:
         """
         Determine the appropriate geographic level (states vs regions) based on query type.
-        
+
         Args:
             query_lower: The query in lowercase
-            
+
         Returns:
             "states" or "regions" based on data availability
         """
@@ -1939,7 +1939,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
         """
         examples = []
         geographic_level = self._get_geographic_level_for_query(query_lower)
-        
+
         if "outage" in query_lower:
             examples.append("Examples for OUTAGE queries:")
             examples.append(
@@ -1965,7 +1965,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             examples.append(
                 f"- 'Do you want the state with the highest EnergyMet or the state with the highest MaximumDemand for all {geographic_level}?'"
             )
-        
+
         elif "demand" in query_lower:
             examples.append("Examples for DEMAND queries:")
             examples.append(
@@ -1977,7 +1977,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             examples.append(
                 f"- 'Do you want the maximum demand value or the average demand value for all {geographic_level}?'"
             )
-        
+
         elif "shortage" in query_lower:
             examples.append("Examples for SHORTAGE queries:")
             examples.append(
@@ -1989,7 +1989,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             examples.append(
                 f"- 'Do you want the total shortage amount or the shortage percentage for all {geographic_level}?'"
             )
-        
+
         elif "generation" in query_lower:
             examples.append("Examples for GENERATION queries:")
             examples.append(
@@ -2001,7 +2001,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             examples.append(
                 f"- 'Do you want the total generation capacity or the actual generation output for all {geographic_level}?'"
             )
-        
+
         else:
             # Generic examples for other query types
             examples.append("Examples for general queries:")
@@ -2014,7 +2014,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             examples.append(
                 f"- 'When you say 'all {geographic_level} in 2025', do you want data for each month of 2025, or the total for the entire year?'"
             )
-        
+
         return "\n".join(examples)
 
     async def _generate_clarification_question(
@@ -2028,7 +2028,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             clarification_prompt = self._build_contextual_clarification_prompt(
                 query, analysis, getattr(request, "clarification_answers", None)
             )
-            
+
             if self.llm_provider:
                 llm_response = await self.llm_provider.generate(clarification_prompt)
                 if (
@@ -2041,7 +2041,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     clarification_question = self._clean_clarification_question(
                         clarification_question
                     )
-                    
+
                     # Validate the question
                     if self._validate_clarification_question(clarification_question):
                         logger.info(
@@ -2062,7 +2062,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             else:
                 logger.warning("No LLM provider available for clarification")
                 return self._generate_schema_based_clarification(query, analysis)
-                
+
         except Exception as e:
             logger.error(f"Error generating clarification question: {str(e)}")
             return self._generate_schema_based_clarification(query, analysis)
@@ -2083,11 +2083,11 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             logger.info(
                 f"Analysis: type={analysis.query_type}, intent={analysis.intent}"
             )
-            
+
             # Build context for SQL generation
             context = self._build_context(query, analysis, "default_user")
             logger.info(f"Context built successfully")
-            
+
             # Use the assembler to generate SQL
             print(f"🔍 CALLING ASSEMBLER generate_sql")
             result = self.sql_assembler.generate_sql(query, analysis, context)
@@ -2095,21 +2095,21 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             logger.info(
                 f"SQL generation result: success={result.success}, sql_length={len(result.sql) if result.sql else 0}"
             )
-            
+
             # If template-based generation failed, try simple fallback for clear queries
             if not result.success or not result.sql:
                 logger.info("Template-based generation failed, trying simple fallback")
                 # No more guessing - only explicit failures that require clarification
-                    return SQLGenerationResult(
+                return SQLGenerationResult(
                     success=False,
                     sql="",
                     error="Template-based SQL generation failed and no simple fallback available.",
                     confidence=0.0,
                     clarification_question="I cannot generate a SQL query for this request. Please provide more specific information.",
-                    )
-            
+                )
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Error in template-based SQL generation: {str(e)}")
             return SQLGenerationResult(
@@ -2132,7 +2132,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
         """
         if not clarification_answers:
             return False
-        
+
         # Check for key clarification patterns
         sufficient_patterns = [
             "energy met",
@@ -2153,7 +2153,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             "total generation",
             "thermal generation",
         ]
-        
+
         # Check if any clarification answer contains sufficient information
         for question, answer in clarification_answers.items():
             answer_lower = answer.lower()
@@ -2163,7 +2163,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                         f"Found sufficient clarification: '{pattern}' in '{answer}'"
                     )
                     return True
-        
+
         return False
 
     def _generate_direct_sql(
@@ -2175,7 +2175,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
         """
         try:
             query_lower = query.lower()
-            
+
             # Use improved trend analysis logic for better detection
             # STEP 1: Determine if it's a growth query or aggregation query
             is_growth_query = any(
@@ -2281,7 +2281,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     f"No schema linker available for query: {query}. Clarification required."
                 )
                 return None
-            
+
             # Determine the aggregation function
             has_maximum = any(
                 term in query_lower for term in ["maximum", "max", "highest", "top"]
@@ -2299,7 +2299,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                 agg_func = "AVG"
             else:
                 agg_func = "SUM"  # Default to sum
-            
+
             # Determine the year
             has_2024 = "2024" in query_lower
             has_2025 = "2025" in query_lower
@@ -2387,11 +2387,11 @@ Generate ONLY the clarification question, no explanations or additional text:"""
             if is_aggregation_query and time_period != "monthly":
                 # Use time-based grouping for aggregation queries
                 if time_period == "quarterly":
-            sql = f"""
+                    sql = f"""
                     SELECT {name_col}, dt.Quarter, ROUND({agg_func}({metric_col}), 2) as {dynamic_alias}
-            FROM {table} f
-            JOIN {join_table} d ON f.{join_col} = d.{join_col}
-            JOIN DimDates dt ON f.DateID = dt.DateID
+                    FROM {table} f
+                    JOIN {join_table} d ON f.{join_col} = d.{join_col}
+                    JOIN DimDates dt ON f.DateID = dt.DateID
                     {where_clause}
                     GROUP BY {name_col}, dt.Quarter
                     ORDER BY {name_col}, dt.Quarter
@@ -2434,7 +2434,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     JOIN {join_table} d ON f.{join_col} = d.{join_col}
                     JOIN DimDates dt ON f.DateID = dt.DateID
                     {where_clause}
-            GROUP BY {name_col}
+                    GROUP BY {name_col}
                     ORDER BY {dynamic_alias} DESC
                     """
                 logger.info(f"🔍 GENERATED DIRECT TIME-BASED SQL: {sql[:200]}...")
@@ -2477,7 +2477,7 @@ Generate ONLY the clarification question, no explanations or additional text:"""
                     logger.info(f"🔍 GENERATED DIRECT REGULAR SQL: {sql[:200]}...")
 
             return sql
-            
+
         except Exception as e:
             logger.error(f"Error in direct SQL generation: {str(e)}")
             return None
@@ -2512,4 +2512,4 @@ def get_rag_service(
     db_path: str, llm_provider=None, memory_service=None
 ) -> EnhancedRAGService:
     """Get RAG service instance with caching"""
-    return EnhancedRAGService(db_path, llm_provider, memory_service) 
+    return EnhancedRAGService(db_path, llm_provider, memory_service)

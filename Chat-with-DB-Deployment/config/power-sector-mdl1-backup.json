@@ -1,0 +1,1545 @@
+{
+  "models": {
+    "FactAllIndiaDailySummary": {
+      "name": "FactAllIndiaDailySummary",
+      "definition": {
+        "description": "Power Supply Position - Region level (Northern, Western, Southern, Eastern and North-Eastern) Daily energy summary and National level (India) Daily energy summary",
+        "grain": "daily_region",
+        "columns": {
+          "DateID": {
+            "type": "INTEGER",
+            "description": "Date reference for the record"
+          },
+          "RegionID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key field for RegionID. Contains values 1 to 5 for Northern, Southern, Western, Eastern and North-Eastern regions respectively and value 6 for India."
+          },
+          "EveningPeakDemandMet": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Maximum power demand met or peak demand met in the evening measured specifically at 20:00 hours (MW)"
+          },
+          "PeakShortage": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Maximum power demand shortage or peak shortage during the evening measured specifically at 20:00 hours (MW)"
+          },
+          "EnergyMet": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Energy Demand met for the region for the day's 24 hour period (MU)"
+          },
+          "EnergyShortage": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Energy shortage ( energy demand not met) in the region for the day's 24 hour period (MU)"
+          },
+          "MaxDemandSCADA": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Maximum power demand measured by SCADA in the day's 24 hour period (MW)"
+          },
+          "TimeOfMaxDemandMet": {
+            "type": "TEXT",
+            "unit": "Time",
+            "unit_symbol": "HH:MM",
+            "unit_category": "Time",
+            "metric_type": "time",
+            "description": "Time of maximum power demand measured by SCADA in the day's 24 hour period (HH:MM)"
+          },
+          "ScheduleDrawal": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Energy Scheduled to be drawn (scheduled energy) by the region for the day's 24 hour period. Positive value if drawing energy from inter state transmission system (ISTS) and negative value for adding energy to ISTS (MU)"
+          },
+          "ActualDrawal": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Energy Actually drawn (actual energy) by the region for the day's 24 hour period (MU). Positive value if drawing energy from inter state transmission system (ISTS) and negative value for adding energy to ISTS (MU)"
+          },
+          "OverUnderDrawal": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Energy Over drawn (positive) or under drawn (negative) by the region from inter state transmission system (ISTS) compared to its drawal schedule. The region's actual drawal is the sum of ScheduleDrawal and OverUnderDrawal (MU)"
+          },
+          "CentralSectorOutage": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Power capacity under outage for the Generating Utilities owned by Central Sector (MW)"
+          },
+          "StateSectorOutage": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Power capacity under outage for the Generating Utilities owned by State Sector (MW)"
+          },
+          "TotalOutage": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Power capacity under outage for the Generating Utilities owned by both Central and State Sectors (MW)"
+          },
+          "ShareRESInTotalGeneration": {
+            "type": "REAL",
+            "unit": "Percent",
+            "unit_symbol": "%",
+            "unit_category": "Ratio",
+            "metric_type": "percentage",
+            "description": "Share of renewable energy sources in total generation (%)"
+          },
+          "ShareNonFossilInTotalGeneration": {
+            "type": "REAL",
+            "unit": "Percent",
+            "unit_symbol": "%",
+            "unit_category": "Ratio",
+            "metric_type": "percentage",
+            "description": "Share of Non-fossil fuel (Hydro, Nuclear and Renewable) sources in total generation (%)"
+          },
+          "FrequencyViolationIndex": {
+            "type": "REAL",
+            "unit": "Index",
+            "unit_symbol": "Index",
+            "unit_category": "Index",
+            "metric_type": "ratio",
+            "description": "Index summarizing frequency violations (Index)"
+          },
+          "DurationFrequencyBelow49_7": {
+            "type": "REAL",
+            "unit": "Percent",
+            "unit_symbol": "%",
+            "unit_category": "Ratio",
+            "metric_type": "percentage",
+            "description": "Duration when system frequency was below 49.7 Hz (%)"
+          },
+          "DurationFrequency_49_7_to_49_8": {
+            "type": "REAL",
+            "unit": "Percent",
+            "unit_symbol": "%",
+            "unit_category": "Ratio",
+            "metric_type": "percentage",
+            "description": "Duration when system frequency was between 49.7 and 49.8 Hz (%)"
+          },
+          "DurationFrequency_49_8_to_49_9": {
+            "type": "REAL",
+            "unit": "Percent",
+            "unit_symbol": "%",
+            "unit_category": "Ratio",
+            "metric_type": "percentage",
+            "description": "Duration when system frequency was between 49.8 and 49.9 Hz (%)"
+          },
+          "DurationFrequencyBelow49_9": {
+            "type": "REAL",
+            "unit": "Percent",
+            "unit_symbol": "%",
+            "unit_category": "Ratio",
+            "metric_type": "percentage",
+            "description": "Duration when system frequency was below 49.9 Hz (%)"
+          },
+          "DurationFrequency_49_9_to_50_05": {
+            "type": "REAL",
+            "unit": "Percent",
+            "unit_symbol": "%",
+            "unit_category": "Ratio",
+            "metric_type": "percentage",
+            "description": "Duration when system frequency was between 49.9 and 50.05 Hz (%)"
+          },
+          "DurationFrequencyAbove50_05": {
+            "type": "REAL",
+            "unit": "Percent",
+            "unit_symbol": "%",
+            "unit_category": "Ratio",
+            "metric_type": "percentage",
+            "description": "Duration when system frequency was above 50.05 Hz (%)"
+          },
+          "RegionDDF": {
+            "type": "REAL",
+            "unit": "Index",
+            "unit_symbol": "Index",
+            "unit_category": "Index",
+            "metric_type": "ratio",
+            "description": "Regions Demand Diversity Factor (R-DDF) - Ratio of Sum of regional maximum demands and All India Maximum Demand (%)"
+          },
+          "StatesDDF": {
+            "type": "REAL",
+            "unit": "Index",
+            "unit_symbol": "Index",
+            "unit_category": "Index",
+            "metric_type": "ratio",
+            "description": "States Demand Diversity Factor (S-DDF) - Ratio of Sum of states maximum demands and All India Maximum Demand (%)"
+          },
+          "SolarHRMaxDemand": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Maximum power demand during solar hours 06:00 to 18:00 (MW)"
+          },
+          "SolarHRMaxDemandTime": {
+            "type": "TEXT",
+            "unit": "Time",
+            "unit_symbol": "HH:MM",
+            "unit_category": "Time",
+            "metric_type": "time",
+            "description": "Time of maximum demand during solar hours 06:00 to 18:00 (HH:MM)"
+          },
+          "SolarHRShortage": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Power Demand shortage at the time of Solar Hour Maximum Demand during solar hours 06:00 to 18:00 (MW)"
+          },
+          "NonSolarHRMaxDemand": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Maximum power demand during non-solar hours 18:00 to 06:00 (MW)"
+          },
+          "NonSolarHRMaxDemandTime": {
+            "type": "TEXT",
+            "unit": "Time",
+            "unit_symbol": "HH:MM",
+            "unit_category": "Time",
+            "metric_type": "time",
+            "description": "Time of maximum demand during non-solar hours 18:00 to 06:00 (HH:MM)"
+          },
+          "NonSolarHRShortage": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Power Demand shortage at the time of Non-Solar Hour Maximum Demand during non-solar hours 18:00 to 06:00 (MW)"
+          }
+        },
+        "metadata": {
+          "business_name": "Region and National Energy Summary",
+          "data_source": "Power System Operation and Control",
+          "update_frequency": "daily"
+        },
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [
+            "EnergyMet",
+            "EnergyShortage",
+            "MaxDemandSCADA",
+            "EveningPeakDemandMet",
+            "PeakShortage",
+            "ShareRESInTotalGeneration",
+            "ShareNonFossilInTotalGeneration"
+          ],
+          "has_date_fk": true,
+          "preferred_category": null,
+          "role": "fact"
+        },
+        "synonyms": [
+          "FactAllIndiaDailySummary",
+          "factallindiadailysummary"
+        ]
+      },
+      "metadata": {
+        "business_name": "Region and National Energy Summary",
+        "data_source": "Power System Operation and Control",
+        "update_frequency": "daily"
+      }
+    },
+    "FactStateDailyEnergy": {
+      "name": "FactStateDailyEnergy",
+      "definition": {
+        "description": "Power Supply Position - State level Daily energy summary",
+        "grain": "daily_state",
+        "columns": {
+          "DateID": {
+            "type": "INTEGER",
+            "description": "Date reference for the record"
+          },
+          "StateID": {
+            "type": "INTEGER",
+            "description": "State identifier having foreign key reference to DimStates table"
+          },
+          "MaximumDemand": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Maximum Power Demand of the state in the day's 24 hour period (MW)"
+          },
+          "Shortage": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Power Shortage at the Maximum Power Demand of the state in the day's 24 hour period (MW)"
+          },
+          "EnergyMet": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Energy Demand met for the state in the day's 24 hour period (MU)"
+          },
+          "DrawalSchedule": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metrc_type": "energy",
+            "description": "Energy scheduled by the state to be drawn from the Inter State Transmission System (ISTS). This is the energy expected to be required by the state apart from its own generation. Positive value if drawing energy from ISTS and negative value if adding energy to ISTS (MU)"
+          },
+          "OverUnderDrawal": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metrc_type": "energy",
+            "description": "Energy Over drawn (positive) or under drawn (negative) by the state from inter state transmission system (ISTS) compared to its drawal schedule. The state's actual drawal is the sum of DrawalSchedule and OverUnderDrawal (MU)"
+          },
+          "MaxOverDrawal": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Maximum power over drawn by the state from inter state transmission system (ISTS) in the day's 24 hour period (MW)"
+          },
+          "EnergyShortage": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Energy shortage (demand not met) in the state for the day's 24 hour period (MU)"
+          }
+        },
+        "metadata": {
+          "business_name": "State Energy Data",
+          "data_source": "Power System Operation and Control",
+          "update_frequency": "daily"
+        },
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [
+            "MaximumDemand",
+            "Shortage",
+            "EnergyMet",
+            "EnergyShortage"
+          ],
+          "has_date_fk": true,
+          "preferred_category": null,
+          "role": "fact"
+        },
+        "synonyms": [
+          "FactStateDailyEnergy",
+          "factstatedailyenergy"
+        ]
+      },
+      "metadata": {
+        "business_name": "State Energy Data",
+        "data_source": "Power System Operation and Control",
+        "update_frequency": "daily"
+      }
+    },
+    "FactDailyGenerationBreakdown": {
+      "name": "FactDailyGenerationBreakdown",
+      "definition": {
+        "description": "Region level Daily energy generation by source type (Hydro, Nuclear, Thermal, Solar, Wind, etc.)",
+        "grain": "daily_source_region",
+        "columns": {
+          "DateID": {
+            "type": "INTEGER",
+            "description": "Date reference for the record"
+          },
+          "RegionID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key field for RegionID having reference to DimRegions table. Contains values 1 to 5 for Northern, Western, Southern, Eastern and North-Eastern regions respectively and value 6 for India."
+          },
+          "GenerationSourceID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key field for GenerationSourceID having reference to DimGenerationSources table."
+          },
+          "GenerationAmount": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Energy generated by the source during the day's 24 hour period (MU)"
+          }
+        },
+        "metadata": {
+          "business_name": "Region and India level Generation Source Energy Breakdown",
+          "data_source": "Power System Operation and Control",
+          "update_frequency": "daily"
+        },
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [
+            "GenerationAmount"
+          ],
+          "has_date_fk": true,
+          "preferred_category": null,
+          "role": "fact"
+        },
+        "synonyms": [
+          "FactDailyGenerationBreakdown",
+          "factdailygenerationbreakdown"
+        ]
+      },
+      "metadata": {
+        "business_name": "Region and India level Generation Source Energy Breakdown",
+        "data_source": "Power System Operation and Control",
+        "update_frequency": "daily"
+      }
+    },
+    "DimCountries": {
+      "name": "DimCountries",
+      "definition": {
+        "columns": {
+          "CountryID": {
+            "type": "INTEGER",
+            "description": "Identifier/primary key field for the Country"
+          },
+          "CountryName": {
+            "type": "TEXT",
+            "description": "Name of the country involved in power exchange. Total Import, Total Export and Total Net are also added as countries"
+          }
+        },
+        "description": "Auto-imported from SQLite: DimCountries",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [],
+          "has_date_fk": false,
+          "preferred_category": "CountryName",
+          "role": "dimension"
+        },
+        "synonyms": [
+          "DimCountries",
+          "DimCountries",
+          "dimcountries",
+          "dimcountries"
+        ]
+      },
+      "metadata": {
+        "business_name": "Countries"
+      }
+    },
+    "DimDates": {
+      "name": "DimDates",
+      "definition": {
+        "columns": {
+          "DateID": {
+            "type": "INTEGER",
+            "description": "Identifer/primary key field for the Date reference of the record"
+          },
+          "ActualDate": {
+            "type": "TEXT",
+            "description": "Date reference for the record in the format YYYY-MM-DD"
+          },
+          "DayOfWeek": {
+            "type": "TEXT",
+            "description": "Day of the week for the date. Values are Monday, Tuesday, Wednesday, Thursday, Friday, Saturday and Sunday."
+          },
+          "DayOfMonth": {
+            "type": "INTEGER",
+            "description": "Day of the month for the date. Values are 1 to 31."
+          },
+          "Month": {
+            "type": "INTEGER",
+            "description": "Month of the year for the date. Values are 1 to 12."
+          },
+          "Quarter": {
+            "type": "INTEGER",
+            "description": "Quarter number of the calendar year for the date. Values are 1 to 4."
+          },
+          "Year": {
+            "type": "INTEGER",
+            "description": "Year of the date."
+          }
+        },
+        "description": "Auto-imported from SQLite: DimDates",
+        "hints": {
+          "preferred_time_column": "ActualDate",
+          "preferred_value_columns": [],
+          "has_date_fk": true,
+          "preferred_category": null,
+          "role": "dimension"
+        },
+        "synonyms": [
+          "DimDates",
+          "DimDates",
+          "dimdates",
+          "dimdates"
+        ]
+      },
+      "metadata": {
+        "business_name": "Dates"
+      }
+    },
+    "DimExchangeMechanisms": {
+      "name": "DimExchangeMechanisms",
+      "definition": {
+        "columns": {
+          "MechanismID": {
+            "type": "INTEGER",
+            "description": "Identifier/primary key field of the Exchange Mechanism for trading energy"
+          },
+          "MechanismName": {
+            "type": "TEXT",
+            "description": "Name of the exchange mechanism used for energy trading"
+          }
+        },
+        "description": "Auto-imported from SQLite: DimExchangeMechanisms",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [],
+          "has_date_fk": false,
+          "preferred_category": "MechanismName",
+          "role": "dimension"
+        },
+        "synonyms": [
+          "DimExchangeMechanisms",
+          "DimExchangeMechanisms",
+          "dimexchangemechanisms",
+          "dimexchangemechanisms"
+        ]
+      },
+      "metadata": {
+        "business_name": "ExchangeMechanisms"
+      }
+    },
+    "DimGenerationSources": {
+      "name": "DimGenerationSources",
+      "definition": {
+        "columns": {
+          "GenerationSourceID": {
+            "type": "INTEGER",
+            "metric_type": "ratio",
+            "description": "Identifier/primary key field of the Generation Source"
+          },
+          "SourceName": {
+            "type": "TEXT",
+            "description": "Name of the generation source (e.g., Solar, Wind, Hydro, Thermal)"
+          },
+          "SourceCategory": {
+            "type": "TEXT",
+            "description": "Name of the Source Category"
+          }
+        },
+        "description": "Auto-imported from SQLite: DimGenerationSources",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [],
+          "has_date_fk": false,
+          "preferred_category": "SourceName",
+          "role": "dimension"
+        },
+        "synonyms": [
+          "DimGenerationSources",
+          "DimGenerationSources",
+          "dimgenerationsources",
+          "dimgenerationsources"
+        ]
+      },
+      "metadata": {
+        "business_name": "GenerationSources"
+      }
+    },
+    "DimRegions": {
+      "name": "DimRegions",
+      "definition": {
+        "columns": {
+          "RegionID": {
+            "type": "INTEGER",
+            "description": "Identifier/primary key field for the Region. Contains values 1 to 5 for Northern, Western, Southern, Eastern and North-Eastern regions respectively and value 6 for India. All regions belong to India."
+          },
+          "RegionName": {
+            "type": "TEXT",
+            "description": "Name of the region"
+          }
+        },
+        "description": "Auto-imported from SQLite: DimRegions",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [],
+          "has_date_fk": false,
+          "preferred_category": "RegionName",
+          "role": "dimension"
+        },
+        "synonyms": [
+          "DimRegions",
+          "DimRegions",
+          "dimregions",
+          "dimregions"
+        ]
+      },
+      "metadata": {
+        "business_name": "Regions"
+      }
+    },
+    "DimReports": {
+      "name": "DimReports",
+      "definition": {
+        "columns": {
+          "DateID": {
+            "type": "INTEGER",
+            "description": "Foreign Key Date reference for the record"
+          },
+          "ReportName": {
+            "type": "TEXT",
+            "description": "ReportName field in DimReports"
+          },
+          "ReportPath": {
+            "type": "TEXT",
+            "description": "ReportPath field in DimReports"
+          },
+          "Source": {
+            "type": "TEXT",
+            "description": "Source field in DimReports"
+          }
+        },
+        "description": "Auto-imported from SQLite: DimReports",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [],
+          "has_date_fk": true,
+          "preferred_category": null,
+          "role": "dimension"
+        },
+        "synonyms": [
+          "DimReports",
+          "DimReports",
+          "dimreports",
+          "dimreports"
+        ]
+      },
+      "metadata": {
+        "business_name": "Reports"
+      }
+    },
+    "DimStates": {
+      "name": "DimStates",
+      "definition": {
+        "columns": {
+          "StateID": {
+            "type": "INTEGER",
+            "description": "Primary key identifier of the state"
+          },
+          "StateName": {
+            "type": "TEXT",
+            "description": "Name of the state in India"
+          },
+          "RegionID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key reference to DimRegions table for the Region to which the Indian state belongs to"
+          }
+        },
+        "description": "Auto-imported from SQLite: DimStates",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [],
+          "has_date_fk": false,
+          "preferred_category": "StateName",
+          "role": "dimension"
+        },
+        "synonyms": [
+          "DimStates",
+          "DimStates",
+          "dimstates",
+          "dimstates"
+        ]
+      },
+      "metadata": {
+        "business_name": "States"
+      }
+    },
+    "DimTransmissionLines": {
+      "name": "DimTransmissionLines",
+      "definition": {
+        "columns": {
+          "LineID": {
+            "type": "INTEGER",
+            "description": "Identifier/primary key field for Transmission Line"
+          },
+          "LineIdentifier": {
+            "type": "TEXT",
+            "description": "Identifier/name of the transmission link or transmission line"
+          },
+          "VoltageLevel_kV": {
+            "type": "TEXT",
+            "description": "Voltage Level in kilo Volts of the Transmission line"
+          },
+          "NumberOfCircuits": {
+            "type": "INTEGER",
+            "description": "Number Of Circuits available for the Transmission Line"
+          },
+          "CountryID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key reference for the Country if the transmission line is an international transmission line"
+          }
+        },
+        "description": "Auto-imported from SQLite: DimTransmissionLines",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [],
+          "has_date_fk": false,
+          "preferred_category": "LineIdentifier",
+          "role": "dimension"
+        },
+        "synonyms": [
+          "DimTransmissionLines",
+          "DimTransmissionLines",
+          "dimtransmissionlines",
+          "dimtransmissionlines"
+        ]
+      },
+      "metadata": {
+        "business_name": "TransmissionLines"
+      }
+    },
+    "DimUnits": {
+      "name": "DimUnits",
+      "definition": {
+        "columns": {
+          "UnitID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key field for UnitID"
+          },
+          "UnitName": {
+            "type": "TEXT",
+            "description": "UnitName field in DimUnits"
+          },
+          "UnitSymbol": {
+            "type": "TEXT",
+            "description": "UnitSymbol field in DimUnits"
+          },
+          "UnitCategory": {
+            "type": "TEXT",
+            "description": "UnitCategory field in DimUnits"
+          },
+          "Description": {
+            "type": "TEXT",
+            "description": "Description field in DimUnits"
+          }
+        },
+        "description": "Auto-imported from SQLite: DimUnits",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [],
+          "has_date_fk": false,
+          "preferred_category": null,
+          "role": "dimension"
+        },
+        "synonyms": [
+          "DimUnits",
+          "DimUnits",
+          "dimunits",
+          "dimunits"
+        ]
+      },
+      "metadata": {
+        "business_name": "Units"
+      }
+    },
+    "FactCountryDailyExchange": {
+      "name": "FactCountryDailyExchange",
+      "definition": {
+        "columns": {
+          "DateID": {
+            "type": "INTEGER",
+            "description": "Foreign key reference to DimDates table for the Date"
+          },
+          "CountryID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key reference to DimCountries table for the Country"
+          },
+          "TotalEnergyExchanged": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Energy imported from the country to India. Positive value if importing energy and negative value if exporting energy (MU)"
+          },
+          "PeakExchange": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Maximum Power Import observed from the country to India. Positive value if importing power and negative value if exporting power (MW)"
+          }
+        },
+        "description": "Auto-imported from SQLite: FactCountryDailyExchange",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [],
+          "has_date_fk": true,
+          "preferred_category": null,
+          "role": "fact"
+        },
+        "synonyms": [
+          "FactCountryDailyExchange",
+          "FactCountryDailyExchange",
+          "factcountrydailyexchange",
+          "factcountrydailyexchange"
+        ]
+      },
+      "metadata": {
+        "business_name": "CountryDailyExchange"
+      }
+    },
+    "FactInternationalTransmissionLinkFlow": {
+      "name": "FactInternationalTransmissionLinkFlow",
+      "definition": {
+        "columns": {
+          "DateID": {
+            "type": "INTEGER",
+            "description": "Foreign key reference to DimDates table for the Date"
+          },
+          "LineID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key reference to DimTransmissionLines table for the Transmission Line"
+          },
+          "CountryID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key reference to DimCountries table for the country from which India is importing"
+          },
+          "StateID": {
+            "type": "INTEGER",
+            "description": "Surrogate identifier of the state"
+          },
+          "RegionID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key reference to DimRegions table for the region in India to which transmission line is connected"
+          },
+          "MaxLoading": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Maximum Power load observed on the international link. Positive value if importing power and negative value if exporting power (MW)"
+          },
+          "MinLoading": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Minimum power load observed on the international link. Positive value if importing power and negative value if exporting power (MW)"
+          },
+          "AvgLoading": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Average power load observed on the international link. Positive value if importing power and negative value if exporting power (MW)"
+          },
+          "EnergyExchanged": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Total energy exchanged across the international link during the day's 24 hour period. Positive value if importing energy and negative value if exporting energy (MU)"
+          }
+        },
+        "description": "International Transmission Line Flow data showing the import information from the neighboring countries to India",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": ["EnergyExchanged", "MaxLoading", "AvgLoading"],
+          "has_date_fk": true,
+          "preferred_category": null,
+          "role": "fact"
+        },
+        "synonyms": [
+          "FactInternationalTransmissionLinkFlow",
+          "FactInternationalTransmissionLinkFlow",
+          "factinternationaltransmissionlinkflow",
+          "factinternationaltransmissionlinkflow"
+        ]
+      },
+      "metadata": {
+        "business_name": "InternationalTransmissionLinkFlow"
+      }
+    },
+    "FactTimeBlockGeneration": {
+      "name": "FactTimeBlockGeneration",
+      "definition": {
+        "columns": {
+          "DateID": {
+            "type": "INTEGER",
+            "description": "Foreign key reference to DimDates table for the Date"
+          },
+          "BlockTime": {
+            "type": "TEXT",
+            "unit": "Time",
+            "unit_symbol": "HH:MM",
+            "unit_category": "Time",
+            "metric_type": "time",
+            "description": "Starting Timestamp of the 15-minute time block in the format HH:MM"
+          },
+          "BlockNumber": {
+            "type": "INTEGER",
+            "description": "Ordinal index of the time block within the day. Values are 1 to 96 for 15-minute time blocks."
+          },
+          "GenerationSourceID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key reference to DimGenerationSources table for the Generation Source"
+          },
+          "GenerationOutput": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Generating Power output by the generation source in the time block (MW)"
+          }
+        },
+        "description": "Generating power data for each generation source for each 15-minute time block during the day",
+        "hints": {
+          "preferred_time_column": "BlockTime",
+          "preferred_value_columns": [
+            "GenerationOutput"
+          ],
+          "has_date_fk": true,
+          "preferred_category": null,
+          "role": "fact"
+        },
+        "synonyms": [
+          "FactTimeBlockGeneration",
+          "FactTimeBlockGeneration",
+          "facttimeblockgeneration",
+          "facttimeblockgeneration"
+        ]
+      },
+      "metadata": {
+        "business_name": "TimeBlockGeneration"
+      }
+    },
+    "FactTimeBlockPowerData": {
+      "name": "FactTimeBlockPowerData",
+      "definition": {
+        "columns": {
+          "DateID": {
+            "type": "INTEGER",
+            "description": "Foreign key reference to DimDates table for the Date"
+          },
+          "BlockTime": {
+            "type": "TEXT",
+            "unit": "Time",
+            "unit_symbol": "HH:MM",
+            "unit_category": "Time",
+            "metric_type": "time",
+            "description": "Starting Timestamp of the 15-minute time block in the format HH:MM"
+          },
+          "BlockNumber": {
+            "type": "INTEGER",
+            "description": "Ordinal index of the time block within the day. Values are 1 to 96 for 15-minute time blocks."
+          },
+          "Frequency": {
+            "type": "REAL",
+            "unit": "Hertz",
+            "unit_symbol": "Hz",
+            "unit_category": "Frequency",
+            "description": "Power System grid frequency in the time block (Hz)"
+          },
+          "DemandMet": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Total Power demand met in the time block (MW)"
+          },
+          "NetDemandMet": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Net power demand met in the time block. Net Demand is the difference between the total power demand met and the sum of generating powers of Solar and Wind in the time block (MW)"
+          },
+          "TotalGeneration": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Total generating power of all the generation sources in the time block (MW)"
+          },
+          "NetTransnationalExchange": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Net transnational exchange in the time block. Positive value if importing power and negative value if exporting power (MW)"
+          }
+        },
+        "description": "Power System data for Power Demand and Generating power supply utilized for each 15-minute time block during the day",
+        "hints": {
+          "preferred_time_column": "BlockTime",
+          "preferred_value_columns": [
+            "TotalGeneration"
+          ],
+          "has_date_fk": true,
+          "preferred_category": null,
+          "role": "fact"
+        },
+        "synonyms": [
+          "FactTimeBlockPowerData",
+          "FactTimeBlockPowerData",
+          "facttimeblockpowerdata",
+          "facttimeblockpowerdata"
+        ]
+      },
+      "metadata": {
+        "business_name": "TimeBlockPowerData"
+      }
+    },
+    "FactTransmissionLinkFlow": {
+      "name": "FactTransmissionLinkFlow",
+      "definition": {
+        "columns": {
+          "DateID": {
+            "type": "INTEGER",
+            "description": "Foreign key reference to DimDates table for the Date"
+          },
+          "LineID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key reference to DimTransmissionLines table for the Transmission Line"
+          },
+          "Inter_Region": {
+            "type": "TEXT",
+            "description": "Region1 to Region2 connection for the Transmission Line. eg., ER-NR, ER-WR, etc."
+          },
+          "MaxImport": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Maximum power import by region1 from region2 of Inter_Region observed on the line in the day's 24 hour period (MW)"
+          },
+          "MaxExport": {
+            "type": "REAL",
+            "unit": "Mega Watts",
+            "unit_symbol": "MW",
+            "unit_category": "Power",
+            "metric_type": "power",
+            "description": "Maximum power export by region1 to region2 of Inter_Region on the line in the day's 24 hour period (MW)"
+          },
+          "ImportEnergy": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Total energy imported by region1 from region2 of Inter_Region on the line in the day's 24 hour period (MU)"
+          },
+          "ExportEnergy": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Total energy exported by region1 to region2 of Inter_Region on the line in the day's 24 hour period (MU)"
+          },
+          "NetImportEnergy": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "Net energy imported by region1 from region2 of Inter_Region on the line in the day's 24 hour period. Positive value if importing energy and negative value if exporting energy (MU)"
+          }
+        },
+        "description": "Transmission Line Flow data showing the import and export information for each region to region connection for the day's 24 hour period",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": ["ImportEnergy", "ExportEnergy", "NetImportEnergy"],
+          "has_date_fk": true,
+          "preferred_category": null,
+          "role": "fact"
+        },
+        "synonyms": [
+          "FactTransmissionLinkFlow",
+          "FactTransmissionLinkFlow",
+          "facttransmissionlinkflow",
+          "facttransmissionlinkflow"
+        ]
+      },
+      "metadata": {
+        "business_name": "TransmissionLinkFlow"
+      }
+    },
+    "FactTransnationalExchangeDetail": {
+      "name": "FactTransnationalExchangeDetail",
+      "definition": {
+        "columns": {
+          "DateID": {
+            "type": "INTEGER",
+            "description": "Foreign key reference to DimDates table for the Date"
+          },
+          "CountryID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key reference to DimCountries table for the Country"
+          },
+          "MechanismID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key reference to DimExchangeMechanisms table for the Exchange Mechanism used for the energy trading"
+          },
+          "ExchangeDirection": {
+            "type": "TEXT",
+            "description": "Direction of the energy exchange from India. Export from India, Import to India, Net Export from India"
+          },
+          "ExchangeValue": {
+            "type": "REAL",
+            "unit": "Million Units",
+            "unit_symbol": "MU",
+            "unit_category": "Energy",
+            "metric_type": "energy",
+            "description": "ExchangeValue field in FactTransnationalExchangeDetail (MU)"
+          }
+        },
+        "description": "Transnational Trading mechanism and Exchange data showing the import and export information for each country to India for the day's 24 hour period",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [],
+          "has_date_fk": true,
+          "preferred_category": null,
+          "role": "fact"
+        },
+        "synonyms": [
+          "FactTransnationalExchangeDetail",
+          "FactTransnationalExchangeDetail",
+          "facttransnationalexchangedetail",
+          "facttransnationalexchangedetail"
+        ]
+      },
+      "metadata": {
+        "business_name": "TransnationalExchangeDetail"
+      }
+    },
+    "MetaTableColumnUnits": {
+      "name": "MetaTableColumnUnits",
+      "definition": {
+        "columns": {
+          "TableColumnUnitID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key field for TableColumnUnitID"
+          },
+          "SchemaName": {
+            "type": "TEXT",
+            "description": "SchemaName field in MetaTableColumnUnits"
+          },
+          "TableName": {
+            "type": "TEXT",
+            "description": "TableName field in MetaTableColumnUnits"
+          },
+          "ColumnName": {
+            "type": "TEXT",
+            "description": "ColumnName field in MetaTableColumnUnits"
+          },
+          "UnitID": {
+            "type": "INTEGER",
+            "description": "Identifier/foreign key field for UnitID"
+          }
+        },
+        "description": "Auto-imported from SQLite: MetaTableColumnUnits",
+        "hints": {
+          "preferred_time_column": null,
+          "preferred_value_columns": [],
+          "has_date_fk": false,
+          "preferred_category": null,
+          "role": "fact"
+        },
+        "synonyms": [
+          "MetaTableColumnUnits",
+          "MetaTableColumnUnits",
+          "metatablecolumnunits",
+          "metatablecolumnunits"
+        ]
+      },
+      "metadata": {
+        "business_name": "MetaTableColumnUnits"
+      }
+    }
+  },
+  "relationships": [
+    {
+      "source": "FactAllIndiaDailySummary",
+      "target": "DimRegions",
+      "type": "many_to_one",
+      "conditions": [
+        "fa.RegionID = dr.RegionID"
+      ],
+      "business_meaning": "Each daily summary belongs to a specific region",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactStateDailyEnergy",
+      "target": "DimStates",
+      "type": "many_to_one",
+      "conditions": [
+        "fs.StateID = ds.StateID"
+      ],
+      "business_meaning": "Each state energy record belongs to a specific state",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactDailyGenerationBreakdown",
+      "target": "DimGenerationSources",
+      "type": "many_to_one",
+      "conditions": [
+        "fd.GenerationSourceID = gs.GenerationSourceID"
+      ],
+      "business_meaning": "Each generation record belongs to a specific source type",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactDailyGenerationBreakdown",
+      "target": "DimRegions",
+      "type": "many_to_one",
+      "conditions": [
+        "fd.RegionID = dr.RegionID"
+      ],
+      "business_meaning": "Each generation record belongs to a specific state",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "DimReports",
+      "target": "DimDates",
+      "type": "one_to_one",
+      "conditions": [
+        "DimReports.DateID = DimDates.DateID"
+      ],
+      "business_meaning": "FK: DimReports.DateID -> DimDates.DateID",
+      "cardinality": "one",
+      "required": true
+    },
+    {
+      "source": "DimStates",
+      "target": "DimRegions",
+      "type": "many_to_one",
+      "conditions": [
+        "DimStates.RegionID = DimRegions.RegionID"
+      ],
+      "business_meaning": "FK: DimStates.RegionID -> DimRegions.RegionID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "DimTransmissionLines",
+      "target": "DimCountries",
+      "type": "many_to_one",
+      "conditions": [
+        "DimTransmissionLines.CountryID = DimCountries.CountryID"
+      ],
+      "business_meaning": "FK: DimTransmissionLines.CountryID -> DimCountries.CountryID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactAllIndiaDailySummary",
+      "target": "DimRegions",
+      "type": "many_to_one",
+      "conditions": [
+        "FactAllIndiaDailySummary.RegionID = DimRegions.RegionID"
+      ],
+      "business_meaning": "FK: FactAllIndiaDailySummary.RegionID -> DimRegions.RegionID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactAllIndiaDailySummary",
+      "target": "DimDates",
+      "type": "many_to_one",
+      "conditions": [
+        "FactAllIndiaDailySummary.DateID = DimDates.DateID"
+      ],
+      "business_meaning": "FK: FactAllIndiaDailySummary.DateID -> DimDates.DateID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactCountryDailyExchange",
+      "target": "DimCountries",
+      "type": "many_to_one",
+      "conditions": [
+        "FactCountryDailyExchange.CountryID = DimCountries.CountryID"
+      ],
+      "business_meaning": "FK: FactCountryDailyExchange.CountryID -> DimCountries.CountryID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactCountryDailyExchange",
+      "target": "DimDates",
+      "type": "many_to_one",
+      "conditions": [
+        "FactCountryDailyExchange.DateID = DimDates.DateID"
+      ],
+      "business_meaning": "FK: FactCountryDailyExchange.DateID -> DimDates.DateID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactDailyGenerationBreakdown",
+      "target": "DimGenerationSources",
+      "type": "many_to_one",
+      "conditions": [
+        "FactDailyGenerationBreakdown.GenerationSourceID = DimGenerationSources.GenerationSourceID"
+      ],
+      "business_meaning": "FK: FactDailyGenerationBreakdown.GenerationSourceID -> DimGenerationSources.GenerationSourceID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactDailyGenerationBreakdown",
+      "target": "DimRegions",
+      "type": "many_to_one",
+      "conditions": [
+        "FactDailyGenerationBreakdown.RegionID = DimRegions.RegionID"
+      ],
+      "business_meaning": "FK: FactDailyGenerationBreakdown.RegionID -> DimRegions.RegionID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactDailyGenerationBreakdown",
+      "target": "DimDates",
+      "type": "many_to_one",
+      "conditions": [
+        "FactDailyGenerationBreakdown.DateID = DimDates.DateID"
+      ],
+      "business_meaning": "FK: FactDailyGenerationBreakdown.DateID -> DimDates.DateID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactInternationalTransmissionLinkFlow",
+      "target": "DimRegions",
+      "type": "many_to_one",
+      "conditions": [
+        "FactInternationalTransmissionLinkFlow.RegionID = DimRegions.RegionID"
+      ],
+      "business_meaning": "FK: FactInternationalTransmissionLinkFlow.RegionID -> DimRegions.RegionID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactInternationalTransmissionLinkFlow",
+      "target": "DimCountries",
+      "type": "many_to_one",
+      "conditions": [
+        "FactInternationalTransmissionLinkFlow.CountryID = DimCountries.CountryID"
+      ],
+      "business_meaning": "FK: FactInternationalTransmissionLinkFlow.CountryID -> DimCountries.CountryID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactInternationalTransmissionLinkFlow",
+      "target": "DimTransmissionLines",
+      "type": "many_to_one",
+      "conditions": [
+        "FactInternationalTransmissionLinkFlow.LineID = DimTransmissionLines.LineID"
+      ],
+      "business_meaning": "FK: FactInternationalTransmissionLinkFlow.LineID -> DimTransmissionLines.LineID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactInternationalTransmissionLinkFlow",
+      "target": "DimDates",
+      "type": "many_to_one",
+      "conditions": [
+        "FactInternationalTransmissionLinkFlow.DateID = DimDates.DateID"
+      ],
+      "business_meaning": "FK: FactInternationalTransmissionLinkFlow.DateID -> DimDates.DateID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactStateDailyEnergy",
+      "target": "DimStates",
+      "type": "many_to_one",
+      "conditions": [
+        "FactStateDailyEnergy.StateID = DimStates.StateID"
+      ],
+      "business_meaning": "FK: FactStateDailyEnergy.StateID -> DimStates.StateID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactStateDailyEnergy",
+      "target": "DimDates",
+      "type": "many_to_one",
+      "conditions": [
+        "FactStateDailyEnergy.DateID = DimDates.DateID"
+      ],
+      "business_meaning": "FK: FactStateDailyEnergy.DateID -> DimDates.DateID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactTimeBlockGeneration",
+      "target": "DimGenerationSources",
+      "type": "many_to_one",
+      "conditions": [
+        "FactTimeBlockGeneration.GenerationSourceID = DimGenerationSources.GenerationSourceID"
+      ],
+      "business_meaning": "FK: FactTimeBlockGeneration.GenerationSourceID -> DimGenerationSources.GenerationSourceID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactTimeBlockGeneration",
+      "target": "FactTimeBlockPowerData",
+      "type": "many_to_many",
+      "conditions": [
+        "FactTimeBlockGeneration.DateID = FactTimeBlockPowerData.DateID"
+      ],
+      "business_meaning": "FK: FactTimeBlockGeneration.DateID -> FactTimeBlockPowerData.DateID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactTimeBlockGeneration",
+      "target": "FactTimeBlockPowerData",
+      "type": "many_to_many",
+      "conditions": [
+        "FactTimeBlockGeneration.BlockTime = FactTimeBlockPowerData.BlockTime"
+      ],
+      "business_meaning": "FK: FactTimeBlockGeneration.BlockTime -> FactTimeBlockPowerData.BlockTime",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactTimeBlockPowerData",
+      "target": "DimDates",
+      "type": "many_to_one",
+      "conditions": [
+        "FactTimeBlockPowerData.DateID = DimDates.DateID"
+      ],
+      "business_meaning": "FK: FactTimeBlockPowerData.DateID -> DimDates.DateID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactTransmissionLinkFlow",
+      "target": "DimTransmissionLines",
+      "type": "many_to_one",
+      "conditions": [
+        "FactTransmissionLinkFlow.LineID = DimTransmissionLines.LineID"
+      ],
+      "business_meaning": "FK: FactTransmissionLinkFlow.LineID -> DimTransmissionLines.LineID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactTransmissionLinkFlow",
+      "target": "DimDates",
+      "type": "many_to_one",
+      "conditions": [
+        "FactTransmissionLinkFlow.DateID = DimDates.DateID"
+      ],
+      "business_meaning": "FK: FactTransmissionLinkFlow.DateID -> DimDates.DateID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactTransnationalExchangeDetail",
+      "target": "DimExchangeMechanisms",
+      "type": "many_to_one",
+      "conditions": [
+        "FactTransnationalExchangeDetail.MechanismID = DimExchangeMechanisms.MechanismID"
+      ],
+      "business_meaning": "FK: FactTransnationalExchangeDetail.MechanismID -> DimExchangeMechanisms.MechanismID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactTransnationalExchangeDetail",
+      "target": "DimCountries",
+      "type": "many_to_one",
+      "conditions": [
+        "FactTransnationalExchangeDetail.CountryID = DimCountries.CountryID"
+      ],
+      "business_meaning": "FK: FactTransnationalExchangeDetail.CountryID -> DimCountries.CountryID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "FactTransnationalExchangeDetail",
+      "target": "DimDates",
+      "type": "many_to_one",
+      "conditions": [
+        "FactTransnationalExchangeDetail.DateID = DimDates.DateID"
+      ],
+      "business_meaning": "FK: FactTransnationalExchangeDetail.DateID -> DimDates.DateID",
+      "cardinality": "many",
+      "required": true
+    },
+    {
+      "source": "MetaTableColumnUnits",
+      "target": "DimUnits",
+      "type": "many_to_one",
+      "conditions": [
+        "MetaTableColumnUnits.UnitID = DimUnits.UnitID"
+      ],
+      "business_meaning": "FK: MetaTableColumnUnits.UnitID -> DimUnits.UnitID",
+      "cardinality": "many",
+      "required": false
+    }
+  ],
+  "metrics": {},
+  "dimensions": {},
+  "business_glossary": {},
+  "metadata": {}
+}

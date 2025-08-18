@@ -34,15 +34,10 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
 
-    # Add CORS middleware with configurable origins
-    cors_origins = settings.get_cors_origins()
-    if settings.app_env == "production" and not cors_origins:
-        logger.warning("No CORS origins configured for production environment")
-        cors_origins = ["*"]  # Fallback for production
-    
+    # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins,
+        allow_origins=["*"],  # Configure appropriately for production
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

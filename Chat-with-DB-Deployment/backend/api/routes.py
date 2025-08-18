@@ -60,43 +60,21 @@ def get_enhanced_rag_service() -> SemanticRAGService:
 
 @router.get("/api/v1/health")
 async def health_check():
-    """Enhanced health check endpoint with Azure SQL support"""
+    """Enhanced health check endpoint"""
     try:
         settings = get_settings_dep()
-        
-        # Import database module
-        from backend.core.database import get_database_health
-        
-        # Get basic database health
-        db_health = get_database_health()
-        
-        # If using Azure SQL, get additional Azure-specific information
-        azure_info = {}
-        if settings.is_azure_sql():
-            try:
-                from backend.core.azure_sql_utils import test_azure_connection, get_azure_server_info
-                
-                # Test Azure connection specifically
-                azure_connection = test_azure_connection()
-                azure_info["connection_test"] = azure_connection
-                
-                # Get Azure server information
-                azure_server_info = get_azure_server_info()
-                azure_info["server_info"] = azure_server_info
-                
-            except Exception as e:
-                logger.warning(f"Failed to get Azure-specific info: {e}")
-                azure_info["error"] = str(e)
-        
+        rag_service = get_rag_service_dep()
+
+        # Sprint 4: Use async SQL execution for better performance
+        test_result = await rag_service.async_sql_executor.execute_sql_async(
+            "SELECT 1 as test;"
+        )
+
         return {
-            "status": "healthy" if db_health["connected"] else "unhealthy",
-            "database": db_health,
-            "azure_sql": azure_info if settings.is_azure_sql() else None,
+            "status": "healthy",
+            "database": "connected" if test_result.success else "disconnected",
             "timestamp": time.time(),
             "version": "2.0.0",
-            "environment": settings.app_env,
-            "database_type": settings.database_type,
-            "is_azure": settings.is_azure_sql(),
         }
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}", exc_info=True)
@@ -1253,103 +1231,3 @@ async def get_available_agents():
     except Exception as e:
         logger.error(f"Failed to get agents: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get agents: {str(e)}")
-
-
-@router.get("/api/v1/azure-sql/status")
-async def azure_sql_status():
-    """Get detailed Azure SQL Server status and performance metrics"""
-    try:
-        settings = get_settings_dep()
-        
-        if not settings.is_azure_sql():
-            raise HTTPException(status_code=400, detail="This endpoint is only available for Azure SQL Server")
-        
-        from backend.core.azure_sql_utils import (
-            test_azure_connection, 
-            get_azure_server_info, 
-            check_azure_performance
-        )
-        
-        # Get comprehensive Azure SQL status
-        connection_status = test_azure_connection()
-        server_info = get_azure_server_info()
-        performance_metrics = check_azure_performance()
-        
-        return {
-            "timestamp": time.time(),
-            "connection": connection_status,
-            "server": server_info,
-            "performance": performance_metrics,
-            "summary": {
-                "is_healthy": connection_status.get("connected", False),
-                "server_name": connection_status.get("server", "Unknown"),
-                "database_name": connection_status.get("database", "Unknown"),
-                "active_connections": performance_metrics.get("performance_metrics", {}).get("active_connections", 0)
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Azure SQL status check failed: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get Azure SQL status: {str(e)}")
-
-
-@router.post("/api/v1/azure-sql/query")
-async def execute_azure_query(request: dict):
-    """Execute a custom query on Azure SQL Server"""
-    try:
-        settings = get_settings_dep()
-        
-        if not settings.is_azure_sql():
-            raise HTTPException(status_code=400, detail="This endpoint is only available for Azure SQL Server")
-        
-        query = request.get("query")
-        params = request.get("params", {})
-        timeout = request.get("timeout", 30)
-        
-        if not query:
-            raise HTTPException(status_code=400, detail="Query is required")
-        
-        # Basic SQL injection protection
-        if any(keyword.lower() in query.lower() for keyword in ["DROP", "DELETE", "TRUNCATE", "ALTER", "CREATE"]):
-            raise HTTPException(status_code=400, detail="Dangerous SQL operations are not allowed")
-        
-        from backend.core.azure_sql_utils import execute_azure_query as azure_query
-        
-        result = azure_query(query, params, timeout)
-        
-        return {
-            "timestamp": time.time(),
-            "query": query,
-            "result": result
-        }
-        
-    except Exception as e:
-        logger.error(f"Azure SQL query execution failed: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Query execution failed: {str(e)}")
-
-
-@router.get("/api/v1/azure-sql/tables/{table_name}")
-async def get_table_details(table_name: str):
-    """Get detailed information about a specific table in Azure SQL"""
-    try:
-        settings = get_settings_dep()
-        
-        if not settings.is_azure_sql():
-            raise HTTPException(status_code=400, detail="This endpoint is only available for Azure SQL Server")
-        
-        from backend.core.azure_sql_utils import get_azure_sql_utils
-        
-        utils = get_azure_sql_utils()
-        table_info = utils.get_table_info(table_name)
-        row_count = utils.get_table_row_count(table_name)
-        
-        return {
-            "timestamp": time.time(),
-            "table_name": table_name,
-            "table_info": table_info,
-            "row_count": row_count
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to get table details for {table_name}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get table details: {str(e)}")

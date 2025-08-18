@@ -3,178 +3,210 @@ Configuration management using pydantic-settings
 """
 
 import os
-from typing import Optional
-
+from typing import Optional, List
 from pydantic_settings import BaseSettings
-
+from pydantic import Field
 
 class Settings(BaseSettings):
-    """Application settings"""
-
+    app_name: str = "Chat-with-DB"
+    app_version: str = "1.0.0"
+    app_env: str = Field(default="development", env="APP_ENV")
+    debug: bool = Field(default=False, env="DEBUG")
+    log_level: str = Field(default="INFO", env="LOG_LEVEL")
+    
     # Database Configuration
-    database_type: str = "sqlite"  # "sqlite", "mssql", "postgresql"
-    database_path: str = "/app/data/power_data.db"  # For SQLite fallback, overridden by DATABASE_PATH env var
+    database_type: str = Field(default="mssql", env="DATABASE_TYPE")
+    database_url: Optional[str] = Field(default=None, env="DATABASE_URL")
     
-    # Azure SQL Server Configuration (when database_type = "mssql")
-    mssql_server: Optional[str] = None
-    mssql_database: Optional[str] = None
-    mssql_username: Optional[str] = None
-    mssql_password: Optional[str] = None
-    mssql_port: int = 1433
-    mssql_timeout: int = 30
-    mssql_encrypt: bool = True
-    mssql_trust_server_certificate: bool = False
-    mssql_connection_timeout: int = 30
-    mssql_command_timeout: int = 30
+    # MSSQL Configuration
+    mssql_server: str = Field(default="localhost", env="MSSQL_SERVER")
+    mssql_database: str = Field(default="Powerflow", env="MSSQL_DATABASE")
+    mssql_username: str = Field(default="sa", env="MSSQL_USERNAME")
+    mssql_password: str = Field(default="", env="MSSQL_PASSWORD")
+    mssql_port: int = Field(default=1433, env="MSSQL_PORT")
+    mssql_encrypt: bool = Field(default=True, env="MSSQL_ENCRYPT")
+    mssql_trust_server_certificate: bool = Field(default=False, env="MSSQL_TRUST_SERVER_CERTIFICATE")
     
-    # Database URL (constructed from above or provided directly)
-    database_url: Optional[str] = None
-
-    # API Configuration
-    api_host: str = "0.0.0.0"
-    api_port: int = 8000
-    api_base_url: str = "http://localhost:8000"
-
-    # Frontend Configuration
-    frontend_origin: str = "http://localhost:3000"
-    cors_origins: list = ["http://localhost:3000", "http://localhost:3001"]
-
-    # Environment Configuration
-    app_env: str = "development"  # "development", "staging", "production"
-    debug: bool = False
-
     # LLM Configuration
-    llm_provider_type: Optional[str] = "ollama"  # "openai", "anthropic", "ollama", "vertex"
-    llm_api_key: Optional[str] = None
-    llm_model: Optional[str] = (
-        "llama3.2:3b"  # e.g., "gpt-3.5-turbo", "claude-3-sonnet", "llama3.2:3b"
-    )
-    llm_base_url: Optional[str] = (
-        "http://localhost:11434"  # For local models or custom endpoints
-    )
-
-    # GPU Acceleration Configuration
-    enable_gpu_acceleration: bool = False  # Enable GPU acceleration for LLM
-    gpu_device: Optional[str] = None  # GPU device to use (e.g., "cuda:0", "mps")
-    gpu_memory_fraction: float = 0.8  # Fraction of GPU memory to use (0.0-1.0)
-
-    # LLM Feature Flags
-    enable_llm_paraphrase: bool = False  # Hook #1
-    enable_llm_column_linking: bool = True  # Hook #2 (high priority)
-    enable_llm_slot_filling: bool = False  # Hook #3
-    enable_llm_candidate_synthesis: bool = True  # Hook #4 (high priority)
-    enable_llm_auto_repair: bool = False  # Hook #5
-    enable_llm_clarification: bool = True  # Hook #6
-    enable_llm_summary: bool = False  # Hook #7
-
-    # LLM Safety Settings
-    max_llm_response_length: int = 300
-    banned_sql_keywords: list = [
-        "DROP",
-        "UPDATE",
-        "DELETE",
-        "INSERT",
-        "CREATE",
-        "ALTER",
-        "TRUNCATE",
-    ]
-
-    # Processing Configuration
-    default_processing_mode: str = "balanced"
-    max_sql_attempts: int = 3
-    sql_timeout: int = 30
-    max_rows: int = 1000
-
-    # Confidence thresholds for different processing modes
-    confidence_thresholds: dict = {"comprehensive": 0.8, "balanced": 0.6, "fast": 0.4}
-
-    # Validation Configuration
-    enable_sql_validation: bool = True
-    enable_sandbox_testing: bool = True
-
-    # Memory Configuration
-    memory_enabled: bool = True
-    memory_cache_ttl: int = 300  # 5 minutes
-
-    # Vector Database
-    vector_db_type: str = "qdrant"  # "qdrant", "pgvector", "none"
-    vector_db_path: str = "power_data_vectors_enhanced"  # For local Qdrant
-    vector_db_url: Optional[str] = None  # For remote Qdrant
-    vector_db_api_key: Optional[str] = None
-    enable_vector_search: bool = True
-
-    # Logging
-    log_level: str = "INFO"
-    enable_structured_logging: bool = True
-
-    # Security
-    enable_query_safety_check: bool = True
-    max_query_length: int = 1000
-
+    llm_provider_type: str = Field(default="gemini", env="LLM_PROVIDER_TYPE")
+    
+    # Gemini Configuration (Primary LLM)
+    gemini_api_key: str = Field(default="", env="GOOGLE_API_KEY")
+    google_api_key: str = Field(default="", env="GOOGLE_API_KEY")  # Alias for compatibility
+    gemini_model: str = Field(default="gemini-2.5-flash-lite", env="GEMINI_MODEL")
+    gemini_temperature: float = Field(default=0.1, env="GEMINI_TEMPERATURE")
+    gemini_max_output_tokens: int = Field(default=8192, env="GEMINI_MAX_OUTPUT_TOKENS")
+    gemini_top_p: float = Field(default=0.8, env="GEMINI_TOP_P")
+    gemini_top_k: int = Field(default=40, env="GEMINI_TOP_K")
+    
+    # OpenAI Configuration (Fallback)
+    openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
+    openai_model: str = Field(default="gpt-4-turbo-preview", env="OPENAI_MODEL")
+    openai_base_url: Optional[str] = Field(default=None, env="OPENAI_BASE_URL")
+    
+    # Anthropic Configuration (Alternative)
+    anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
+    anthropic_model: str = Field(default="claude-3-sonnet-20240229", env="ANTHROPIC_MODEL")
+    
+    # Vector Database Configuration
+    vector_db_url: Optional[str] = Field(default=None, env="VECTOR_DB_URL")
+    vector_db_api_key: Optional[str] = Field(default=None, env="VECTOR_DB_API_KEY")
+    
+    # Qdrant Configuration
+    qdrant_host: str = Field(default="localhost", env="QDRANT_HOST")
+    qdrant_port: int = Field(default=6333, env="QDRANT_PORT")
+    qdrant_api_key: Optional[str] = Field(default=None, env="QDRANT_API_KEY")
+    
+    # ChromaDB Configuration
+    chroma_db_path: str = Field(default="/app/vector_db", env="CHROMA_DB_PATH")
+    
+    # AI/ML Components Configuration
+    wren_ai_enabled: bool = Field(default=True, env="WREN_AI_ENABLED")
+    semantic_engine_enabled: bool = Field(default=True, env="SEMANTIC_ENGINE_ENABLED")
+    agentic_framework_enabled: bool = Field(default=True, env="AGENTIC_FRAMEWORK_ENABLED")
+    entity_recognition_enabled: bool = Field(default=True, env="ENTITY_RECOGNITION_ENABLED")
+    
+    # Performance Configuration
+    max_connections: int = Field(default=100, env="MAX_CONNECTIONS")
+    connection_timeout: int = Field(default=30, env="CONNECTION_TIMEOUT")
+    request_timeout: int = Field(default=300, env="REQUEST_TIMEOUT")
+    
+    # Caching Configuration
+    cache_ttl: int = Field(default=3600, env="CACHE_TTL")
+    cache_max_size: int = Field(default=1000, env="CACHE_MAX_SIZE")
+    
+    # Security Configuration
+    secret_key: str = Field(default="your-secret-key-here", env="SECRET_KEY")
+    algorithm: str = Field(default="HS256", env="ALGORITHM")
+    access_token_expire_minutes: int = Field(default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
+    
+    # CORS Configuration
+    cors_origins: List[str] = Field(default=["http://localhost:3000"], env="CORS_ORIGINS")
+    frontend_origin: str = Field(default="http://localhost:3000", env="FRONTEND_ORIGIN")
+    
+    # Monitoring Configuration
+    enable_metrics: bool = Field(default=True, env="ENABLE_METRICS")
+    enable_structured_logging: bool = Field(default=True, env="ENABLE_STRUCTURED_LOGGING")
+    metrics_port: int = Field(default=9090, env="METRICS_PORT")
+    
+    # Feature Flags
+    enable_gpu_acceleration: bool = Field(default=False, env="ENABLE_GPU_ACCELERATION")
+    enable_vector_search: bool = Field(default=True, env="ENABLE_VECTOR_SEARCH")
+    enable_semantic_processing: bool = Field(default=True, env="ENABLE_SEMANTIC_PROCESSING")
+    enable_agentic_workflows: bool = Field(default=True, env="ENABLE_AGENTIC_WORKFLOWS")
+    enable_feedback_learning: bool = Field(default=True, env="ENABLE_FEEDBACK_LEARNING")
+    enable_temporal_processing: bool = Field(default=True, env="ENABLE_TEMPORAL_PROCESSING")
+    
+    # Development Configuration
+    enable_swagger_ui: bool = Field(default=True, env="ENABLE_SWAGGER_UI")
+    enable_reload: bool = Field(default=False, env="ENABLE_RELOAD")
+    enable_debug_endpoints: bool = Field(default=False, env="ENABLE_DEBUG_ENDPOINTS")
+    testing_mode: bool = Field(default=False, env="TESTING_MODE")
+    
+    # Additional Configuration Fields
+    # database_path is now derived from MSSQL configuration
+    database_path: Optional[str] = None  # Will be set dynamically from MSSQL config
+    llm_api_key: Optional[str] = Field(default=None, env="LLM_API_KEY")
+    llm_model: Optional[str] = Field(default=None, env="LLM_MODEL")
+    llm_base_url: Optional[str] = Field(default=None, env="LLM_BASE_URL")
+    gpu_device: Optional[str] = Field(default=None, env="GPU_DEVICE")
+    max_query_length: int = Field(default=1000, env="MAX_QUERY_LENGTH")
+    enable_llm_clarification: bool = Field(default=True, env="ENABLE_LLM_CLARIFICATION")
+    memory_cache_ttl: int = Field(default=3600, env="MEMORY_CACHE_TTL")
+    
     class Config:
         env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"  # Ignore extra fields from environment
+        env_file_encoding = "utf-8-sig"  # Handle BOM
+        case_sensitive = False
+        extra = "allow"  # Allow extra fields from environment
 
     def get_database_url(self) -> str:
-        """Get the appropriate database URL based on configuration"""
+        """Get database URL based on configuration"""
         if self.database_url:
             return self.database_url
         
-        if self.database_type == "mssql":
-            if not all([self.mssql_server, self.mssql_database, self.mssql_username, self.mssql_password]):
-                raise ValueError("Azure SQL configuration incomplete. Set mssql_server, mssql_database, mssql_username, mssql_password")
-            
-            # URL encode the password to handle special characters
-            import urllib.parse
-            encoded_password = urllib.parse.quote_plus(self.mssql_password)
-            
-            # Construct the proper SQLAlchemy URL for Azure SQL
-            # Format: mssql+pyodbc://username:password@server:port/database?driver=ODBC+Driver+18+for+SQL+Server&param1=value1&param2=value2
-            
-            base_url = f"mssql+pyodbc://{self.mssql_username}:{encoded_password}@{self.mssql_server}.database.windows.net:{self.mssql_port}/{self.mssql_database}"
-            
-            # Build query parameters
-            query_params = [
-                "driver=ODBC+Driver+18+for+SQL+Server",
-                f"Server=tcp:{self.mssql_server}.database.windows.net,{self.mssql_port}",
-                f"Database={self.mssql_database}",
-                f"Encrypt={'yes' if self.mssql_encrypt else 'no'}",
-                f"TrustServerCertificate={'yes' if self.mssql_trust_server_certificate else 'no'}",
-                f"Connection+Timeout={self.mssql_connection_timeout}",
-                f"Command+Timeout={self.mssql_command_timeout}",
-                "MultipleActiveResultSets=true",
-                "ApplicationIntent=ReadWrite"
-            ]
-            
-            # Combine base URL with query parameters
-            full_url = f"{base_url}?{'&'.join(query_params)}"
-            
-            return full_url
-            
-        elif self.database_type == "sqlite":
-            return f"sqlite:///{self.database_path}"
-        else:
-            raise ValueError(f"Unsupported database type: {self.database_type}")
-
-    def get_cors_origins(self) -> list:
-        """Get CORS origins, with frontend_origin as fallback"""
+        if self.database_type.lower() == "mssql":
+            # Generate proper pyodbc connection string
+            return (
+                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+                f"SERVER={self.mssql_server};"
+                f"DATABASE={self.mssql_database};"
+                f"UID={self.mssql_username};"
+                f"PWD={self.mssql_password};"
+                f"PORT={self.mssql_port};"
+                f"Encrypt={'yes' if self.mssql_encrypt else 'no'};"
+                f"TrustServerCertificate={'yes' if self.mssql_trust_server_certificate else 'no'}"
+            )
+        
+        raise ValueError(f"Unsupported database type: {self.database_type}")
+    
+    def is_azure_sql(self) -> bool:
+        """Check if using Azure SQL Database"""
+        return (
+            self.database_type.lower() == "mssql" and 
+            "database.windows.net" in self.mssql_server.lower()
+        )
+    
+    def get_cors_origins(self) -> List[str]:
+        """Get CORS origins with fallback"""
         if self.cors_origins:
             return self.cors_origins
-        return [self.frontend_origin] if self.frontend_origin else []
+        return [self.frontend_origin] if self.frontend_origin else ["http://localhost:3000"]
 
-    def is_azure_sql(self) -> bool:
-        """Check if using Azure SQL Server"""
-        return self.database_type == "mssql" and self.mssql_server and ".database.windows.net" in self.get_database_url()
-
-
-# Lazy settings instance
-_settings_instance = None
-
+# Global settings instance
+_settings = None
 
 def get_settings() -> Settings:
-    """Get application settings (lazy initialization)"""
-    global _settings_instance
-    if _settings_instance is None:
-        _settings_instance = Settings()
-    return _settings_instance
+    """Get global settings instance"""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+        # Set database_path dynamically
+        if _settings.database_type.lower() == "mssql":
+            _settings.database_path = _settings.get_database_url()
+    return _settings
+
+def update_settings(**kwargs):
+    """Update settings dynamically"""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    
+    for key, value in kwargs.items():
+        if hasattr(_settings, key):
+            setattr(_settings, key, value)
+
+def get_database_url() -> str:
+    """Get database URL based on configuration"""
+    settings = get_settings()
+    return settings.get_database_url()
+
+def get_llm_provider_config() -> dict:
+    """Get LLM provider configuration"""
+    settings = get_settings()
+    
+    if settings.llm_provider_type.lower() == "gemini":
+        return {
+            "provider": "gemini",
+            "api_key": settings.google_api_key,  # Use google_api_key instead of gemini_api_key
+            "model": settings.gemini_model,
+            "temperature": settings.gemini_temperature,
+            "max_output_tokens": settings.gemini_max_output_tokens,
+            "top_p": settings.gemini_top_p,
+            "top_k": settings.gemini_top_k
+        }
+    elif settings.llm_provider_type.lower() == "openai":
+        return {
+            "provider": "openai",
+            "api_key": settings.openai_api_key,
+            "model": settings.openai_model,
+            "base_url": settings.openai_base_url
+        }
+    elif settings.llm_provider_type.lower() == "anthropic":
+        return {
+            "provider": "anthropic",
+            "api_key": settings.anthropic_api_key,
+            "model": settings.anthropic_model
+        }
+    else:
+        raise ValueError(f"Unsupported LLM provider: {settings.llm_provider_type}")

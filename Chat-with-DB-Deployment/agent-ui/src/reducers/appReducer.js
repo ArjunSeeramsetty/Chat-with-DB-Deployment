@@ -6,7 +6,7 @@ export const initialState = {
   summary: "",
   sql: "",
   error: "",
-  llm: "openai", // Default to OpenAI for faster responses
+  llm: "gemini", // Default to Gemini 2.5 Flash-Lite for cost efficiency
   selectedEndpoint: "ask-fixed", // API endpoint selector: ask (enhanced default), ask-enhanced, ask-fixed (traditional), ask-agentic
   plot: null,
   viewMode: "chart",

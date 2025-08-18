@@ -167,7 +167,7 @@ const useQueryService = (dispatch, state) => {
         dispatch({ type: 'QUERY_ERROR', payload: "Failed to connect to backend." });
       }
     }
-  }, [state.question, state.backendStatus, state.clarificationAnswers, state.clarificationAnswer, state.clarificationAttemptCount, state.clarificationQuestion, state.selectedEndpoint, dispatch]);
+  }, [state.question, state.backendStatus, state.clarificationAnswers, state.clarificationAnswer, state.clarificationAttemptCount, state.clarificationQuestion, state.selectedEndpoint, state.llm, dispatch]);
 
   const handleCancel = useCallback(() => {
     if (state.abortController) {

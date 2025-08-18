@@ -426,6 +426,25 @@ def create_llm_provider(
             enable_gpu=enable_gpu,
             gpu_device=gpu_device,
         )
+    elif provider_type.lower() == "gemini":
+        try:
+            from .llm_provider_gemini import GeminiLLMProvider, GeminiConfig
+            
+            if not api_key:
+                logger.warning("Gemini provider requires API key, using mock provider")
+                return MockLLMProvider()
+                
+            config = GeminiConfig(
+                api_key=api_key,
+                model=model or "gemini-2.5-flash-lite"
+            )
+            return GeminiLLMProvider(config)
+        except ImportError as e:
+            logger.error(f"Failed to import Gemini provider: {e}")
+            return MockLLMProvider()
+        except Exception as e:
+            logger.error(f"Failed to create Gemini provider: {e}")
+            return MockLLMProvider()
     elif provider_type.lower() == "anthropic":
         # TODO: Implement Anthropic provider
         logger.warning("Anthropic provider not yet implemented, using mock")

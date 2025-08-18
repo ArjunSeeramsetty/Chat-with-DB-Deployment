@@ -1,14 +1,15 @@
 """
 Safe SQL execution with proper error handling and timeout management
-Sprint 4: Refactor executor to asyncio.to_thread Latency ↓ 15%
+Updated for MS SQL Server compatibility
 """
 
 import asyncio
 import logging
-import sqlite3
+import pyodbc
 import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
+from backend.config import get_settings
 
 from backend.core.types import ExecutionResult
 
@@ -18,15 +19,24 @@ logger = logging.getLogger(__name__)
 class SQLExecutor:
     """
     Handles safe and efficient SQL execution with error handling and timeout management.
-    Sprint 4: Optimized for asyncio.to_thread and reduced latency.
+    Updated for MS SQL Server compatibility.
     """
 
     def __init__(self, database_path: str):
         self.database_path = database_path
         self.max_rows = 10000
         self.timeout_seconds = 30
-        # Sprint 4: Configurable journal mode for better portability
-        self.journal_mode = "DEFERRED"  # Default to DEFERRED instead of WAL
+        self.settings = get_settings()
+        
+    def _get_connection(self):
+        """Get MS SQL Server connection"""
+        try:
+            # Use the connection string from settings
+            conn_str = self.settings.get_database_url()
+            return pyodbc.connect(conn_str, timeout=self.timeout_seconds)
+        except Exception as e:
+            logger.error(f"Failed to connect to MS SQL Server: {e}")
+            raise
 
     def execute_sql(self, sql: str) -> ExecutionResult:
         """
@@ -107,29 +117,12 @@ class SQLExecutor:
                 )
                 return True, data, None
 
-            except sqlite3.Error as e:
-                logger.error(f"SQLite error: {str(e)}")
-                return False, None, f"SQLite error: {str(e)}"
+            except pyodbc.Error as e:
+                logger.error(f"MS SQL Server error: {str(e)}")
+                return False, None, f"MS SQL Server error: {str(e)}"
             except Exception as e:
                 logger.error(f"Execution error: {str(e)}")
                 return False, None, f"Execution error: {str(e)}"
-
-    @contextmanager
-    def _get_connection(self):
-        """
-        Get database connection with proper configuration.
-        Sprint 4: Configurable journal mode for better portability.
-        """
-        conn = None
-        try:
-            conn = sqlite3.connect(self.database_path)
-            conn.execute("PRAGMA busy_timeout = 5000")
-            # Sprint 4: Use configurable journal mode instead of hardcoded WAL
-            conn.execute(f"PRAGMA journal_mode = {self.journal_mode}")
-            yield conn
-        finally:
-            if conn:
-                conn.close()
 
     def test_connection(self) -> bool:
         """

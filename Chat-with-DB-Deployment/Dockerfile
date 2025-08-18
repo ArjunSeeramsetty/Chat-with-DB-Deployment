@@ -1,60 +1,74 @@
-# Chat with DB - Backend Dockerfile
-# Multi-stage build for optimized production image with Azure SQL Server support
+# Multi-stage build for enhanced AI/ML application
+FROM python:3.11-slim-bullseye as builder
 
-# Stage 1: Build stage
-FROM python:3.11-slim as builder
-
-# Install system dependencies for building
+# Install system dependencies for enhanced components
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
-    curl \
-    gnupg \
-    apt-transport-https \
     unixodbc \
     unixodbc-dev \
     build-essential \
+    curl \
+    gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Microsoft ODBC Driver 18 for SQL Server (Azure SQL compatible)
+# Install Microsoft ODBC Driver 18 for SQL Server
 RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
-    curl https://packages.microsoft.com/config/debian/12/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
-    apt-get update && \
-    ACCEPT_EULA=Y apt-get install -y msodbcsql18
+    curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
+    apt-get update && ACCEPT_EULA=Y apt-get install -y msodbcsql18
+
+# Install additional system dependencies for AI/ML components
+RUN apt-get update && apt-get install -y \
+    libgomp1 \
+    libblas3 \
+    liblapack3 \
+    libatlas-base-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
+# Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Stage 2: Production stage
-FROM python:3.11-slim
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Install runtime dependencies including ODBC drivers
+# Production stage
+FROM python:3.11-slim-bullseye
+
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y \
+    unixodbc \
     curl \
     gnupg \
-    apt-transport-https \
-    unixodbc \
-    unixodbc-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Microsoft ODBC Driver 18 for SQL Server (Azure SQL compatible)
+# Install Microsoft ODBC Driver 18 for SQL Server
 RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
-    curl https://packages.microsoft.com/config/debian/12/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
-    apt-get update && \
-    ACCEPT_EULA=Y apt-get install -y msodbcsql18
+    curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
+    apt-get update && ACCEPT_EULA=Y apt-get install -y msodbcsql18
+
+# Install runtime AI/ML dependencies
+RUN apt-get update && apt-get install -y \
+    libgomp1 \
+    libblas3 \
+    liblapack3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Create necessary directories first
+RUN mkdir -p /app/logs /app/cache /app/uploads
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash app
 
-# Set working directory
-WORKDIR /app
-
-# Copy Python packages from builder stage
-COPY --from=builder /root/.local /home/app/.local
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Create data directory and copy database file
 # IMPORTANT: The 'power_data.db' file must be placed in a 'data' directory
@@ -63,25 +77,18 @@ RUN mkdir -p /app/data
 COPY data/power_data.db /app/data/power_data.db
 
 # Copy application code
-COPY backend/ ./backend/
-COPY start_backend.py .
-COPY pyproject.toml .
+COPY --chown=app:app . .
+
+# Change ownership of all files
+RUN chown -R app:app /app
+
+# Switch to non-root user
+USER app
 
 # Set environment variables
 ENV PYTHONPATH=/app
-ENV PATH=/home/app/.local/bin:$PATH
 ENV PYTHONUNBUFFERED=1
-
-# Azure SQL specific environment variables
-ENV MSSQL_DRIVER="ODBC Driver 18 for SQL Server"
-ENV MSSQL_ENCRYPT="yes"
-ENV MSSQL_TRUST_SERVER_CERTIFICATE="no"
-
-# Change ownership to app user
-RUN chown -R app:app /app
-
-# Switch to app user
-USER app
+ENV PYTHONDONTWRITEBYTECODE=1
 
 # Expose port
 EXPOSE 8000
@@ -90,5 +97,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/health || exit 1
 
-# Default command
-CMD ["python", "start_backend.py"]
+# Start command
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

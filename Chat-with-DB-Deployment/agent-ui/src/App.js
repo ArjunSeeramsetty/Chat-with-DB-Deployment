@@ -142,6 +142,7 @@ function App() {
               value={state.llm}
               onChange={(e) => dispatch({ type: 'SET_FIELD', field: 'llm', payload: e.target.value })}
             >
+              <MenuItem value="gemini">Gemini 2.5 Flash-Lite</MenuItem>
               <MenuItem value="openai">OpenAI GPT-4</MenuItem>
               <MenuItem value="ollama">Ollama (Local)</MenuItem>
             </Select>

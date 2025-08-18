@@ -592,12 +592,23 @@ class SQLAssembler:
         User Mappings:
         {self._format_user_mappings([{"user_term": m.mapping_type, "dimension_table": m.entity.table, "dimension_value": m.entity.name} for m in context.user_mappings])}
         
-        Generate a valid SQLite SQL query that:
+        Generate a valid MS SQL Server (T-SQL) query that:
         1. Uses the appropriate fact and dimension tables
         2. Includes proper JOINs
         3. Applies relevant filters based on user mappings
         4. Groups and orders results appropriately
-        5. Returns only the SQL query, no explanations
+        5. Uses MS SQL Server date functions (DATEPART, FORMAT, CONVERT) instead of SQLite functions
+        6. Uses appropriate window functions (LAG, LEAD, ROW_NUMBER, RANK) when beneficial for growth calculations, rankings, or period comparisons
+        7. Uses proper MS SQL Server syntax (e.g., [TableName] for table names if needed)
+        8. CRITICAL: For GROUP BY, use the FULL EXPRESSION, not just the alias (e.g., GROUP BY FORMAT(d.ActualDate, 'yyyy-MM'), not GROUP BY Month)
+        9. Returns only the SQL query, no explanations
+        
+        ⚠️  CRITICAL GROUP BY EXAMPLES - COPY EXACTLY:
+        ✅ CORRECT: GROUP BY FORMAT(d.ActualDate, 'yyyy-MM')
+        ❌ WRONG: GROUP BY Month
+        
+        ✅ CORRECT: GROUP BY r.RegionName, FORMAT(d.ActualDate, 'yyyy-MM')
+        ❌ WRONG: GROUP BY r.RegionName, Month
         """
 
         return prompt
@@ -634,12 +645,20 @@ class SQLAssembler:
                 'factcountrydailyexchange': 'country_daily_exchange_query',
                 'facttransnationalexchangedetail': 'exchange_query',
             }
-            for tname, tkey in explicit_map.items():
-                if tname in oq:
-                    template_key = tkey
-                    fallback_template_key = tkey
-                    logger.info(f"Explicit table detected in query; forcing template {tkey}")
-                    break
+            
+            # Special handling for time-block generation queries
+            if any(k in oq for k in ["time block", "time-block", "hourly", "15 min", "15-minute", "intraday"]) and any(k in oq for k in ["generation", "by source", "source"]):
+                template_key = 'time_block_generation_query'
+                fallback_template_key = 'time_block_generation_query'
+                logger.info("Time-block generation detected; forcing time_block_generation_query template")
+            else:
+                # Regular explicit table detection
+                for tname, tkey in explicit_map.items():
+                    if tname in oq:
+                        template_key = tkey
+                        fallback_template_key = tkey
+                        logger.info(f"Explicit table detected in query; forcing template {tkey}")
+                        break
         except Exception:
             pass
         if analysis.query_type.value == "exchange_detail":
@@ -1764,6 +1783,18 @@ class SQLAssembler:
                 if analysis.query_type.value == "region":
                     # Map region entity via centralized entity loader (supports aliases like "north")
                     entity_lower = entity.lower()
+                    
+                    # Filter out non-region entities (like metrics, concepts, etc.)
+                    non_region_entities = [
+                        "energy", "power", "electricity", "shortage", "demand", "generation",
+                        "consumption", "availability", "requirement", "surplus", "deficit",
+                        "flow", "exchange", "transmission", "loading", "capacity", "plf"
+                    ]
+                    
+                    if entity_lower in non_region_entities:
+                        logger.info(f"Skipping non-region entity: '{entity}' in region query")
+                        continue
+                    
                     mapped_region = self.entity_loader.get_proper_region_name(entity_lower)
 
                     if mapped_region:
@@ -2371,16 +2402,16 @@ class SQLAssembler:
 
         # Define source name mappings for database filtering
         source_filters = {
-            "coal": "gs.SourceName LIKE '%coal%' OR gs.SourceName LIKE '%thermal%'",
-            "solar": "gs.SourceName LIKE '%solar%' OR gs.SourceName LIKE '%photovoltaic%'",
-            "wind": "gs.SourceName LIKE '%wind%'",
-            "nuclear": "gs.SourceName LIKE '%nuclear%' OR gs.SourceName LIKE '%atomic%'",
-            "hydro": "gs.SourceName LIKE '%hydro%' OR gs.SourceName LIKE '%water%'",
-            "gas": "gs.SourceName LIKE '%gas%' OR gs.SourceName LIKE '%lng%'",
-            "biomass": "gs.SourceName LIKE '%biomass%' OR gs.SourceName LIKE '%bio%'",
-            "geothermal": "gs.SourceName LIKE '%geothermal%'",
-            "renewable": "gs.SourceName NOT LIKE '%coal%' AND gs.SourceName NOT LIKE '%thermal%' AND gs.SourceName NOT LIKE '%gas%'",
-            "thermal": "gs.SourceName LIKE '%coal%' OR gs.SourceName LIKE '%thermal%' OR gs.SourceName LIKE '%gas%'",
+            "coal": "dgs.SourceName LIKE '%coal%' OR dgs.SourceName LIKE '%thermal%'",
+            "solar": "dgs.SourceName LIKE '%solar%' OR dgs.SourceName LIKE '%photovoltaic%'",
+            "wind": "dgs.SourceName LIKE '%wind%'",
+            "nuclear": "dgs.SourceName LIKE '%nuclear%' OR dgs.SourceName LIKE '%atomic%'",
+            "hydro": "dgs.SourceName LIKE '%hydro%' OR dgs.SourceName LIKE '%water%'",
+            "gas": "dgs.SourceName LIKE '%gas%' OR dgs.SourceName LIKE '%lng%'",
+            "biomass": "dgs.SourceName LIKE '%biomass%' OR dgs.SourceName LIKE '%bio%'",
+            "geothermal": "dgs.SourceName LIKE '%geothermal%'",
+            "renewable": "dgs.SourceName NOT LIKE '%coal%' AND dgs.SourceName NOT LIKE '%thermal%' AND dgs.SourceName NOT LIKE '%gas%'",
+            "thermal": "dgs.SourceName LIKE '%coal%' OR dgs.SourceName LIKE '%thermal%' OR dgs.SourceName LIKE '%gas%'",
         }
 
         source_filter = source_filters.get(generation_source.lower())
@@ -2417,15 +2448,15 @@ class SQLAssembler:
             SUM({energy_column}) as TotalEnergy
         FROM FactAllIndiaDailySummary f
         JOIN DimDates d ON f.DateID = d.DateID
-        WHERE strftime('%Y', d.Date) = '2024'
+        WHERE DATEPART(YEAR, d.Date) = 2024
         """
     
     def _generate_growth_fallback_sql(self, query_lower: str, energy_column: str) -> str:
-        """Generate SQLite-friendly growth SQL using self-joins"""
+        """Generate MS SQL Server-friendly growth SQL using self-joins"""
         return f"""
         SELECT 
             r.RegionName,
-            strftime('%Y-%m', d.Date) as Month,
+            FORMAT(d.Date, 'yyyy-MM') as Month,
             SUM(fs.{energy_column}) as TotalEnergy,
             prev.PreviousMonthEnergy,
             CASE 
@@ -2439,16 +2470,16 @@ class SQLAssembler:
         LEFT JOIN (
             SELECT 
                 r2.RegionName,
-                strftime('%Y-%m', d2.Date) as Month,
+                FORMAT(d2.Date, 'yyyy-MM') as Month,
                 SUM(fs2.{energy_column}) as PreviousMonthEnergy
             FROM FactAllIndiaDailySummary fs2
             JOIN DimRegions r2 ON fs2.RegionID = r2.RegionID
             JOIN DimDates d2 ON fs2.DateID = d2.DateID
-            WHERE strftime('%Y', d2.Date) = '2024'
-            GROUP BY r2.RegionName, strftime('%Y-%m', d2.Date)
+            WHERE DATEPART(YEAR, d2.Date) = 2024
+            GROUP BY r2.RegionName, FORMAT(d2.Date, 'yyyy-MM')
         ) prev ON r.RegionName = prev.RegionName 
-            AND strftime('%Y-%m', d.Date) = date(prev.Month || '-01', '+1 month')
-        WHERE strftime('%Y', d.Date) = '2024'
-        GROUP BY r.RegionName, strftime('%Y-%m', d.Date)
+            AND FORMAT(d.Date, 'yyyy-MM') = DATEADD(MONTH, 1, prev.Month + '-01')
+        WHERE DATEPART(YEAR, d.Date) = 2024
+        GROUP BY r.RegionName, FORMAT(d.Date, 'yyyy-MM')
         ORDER BY r.RegionName, Month
         """

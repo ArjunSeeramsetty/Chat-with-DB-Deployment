@@ -32,7 +32,8 @@ const useQueryService = (dispatch, state) => {
       const requestPayload = { 
         question: currentQuestion,
         user_id: "default_user",
-        processing_mode: "balanced"
+        processing_mode: "balanced",
+        llm_provider: state.llm // Include selected LLM provider
       };
       
       // If we have clarification answers, include them
