@@ -77,11 +77,13 @@ const DataVisualization = ({
         ];
         
         primaryAxisKeys = allSeries.filter(series => {
+          if (!series || typeof series !== 'string') return false;
           const seriesLower = series.toLowerCase();
           return !secondaryKeywords.some(keyword => seriesLower.includes(keyword));
         });
         
         finalSecondaryAxisKeys = allSeries.filter(series => {
+          if (!series || typeof series !== 'string') return false;
           const seriesLower = series.toLowerCase();
           return secondaryKeywords.some(keyword => seriesLower.includes(keyword));
         });
@@ -111,6 +113,7 @@ const DataVisualization = ({
         ];
         
         const potentialSecondary = yAxisKeys.filter(key => {
+          if (!key || typeof key !== 'string') return false;
           const keyLower = key.toLowerCase();
           return secondaryKeywords.some(keyword => keyLower.includes(keyword));
         });
@@ -149,10 +152,12 @@ const DataVisualization = ({
     
     // Check if it's time series data
     const isTimeSeries = headers.some(header => 
-      header.toLowerCase().includes('date') || 
-      header.toLowerCase().includes('month') || 
-      header.toLowerCase().includes('year') ||
-      header.toLowerCase().includes('quarter')
+      header && typeof header === 'string' && (
+        header.toLowerCase().includes('date') || 
+        header.toLowerCase().includes('month') || 
+        header.toLowerCase().includes('year') ||
+        header.toLowerCase().includes('quarter')
+      )
     );
     
     // Check if it's growth data
@@ -160,15 +165,19 @@ const DataVisualization = ({
     
     // Check for dual-axis potential
     const hasGrowthColumns = headers.some(header => 
-      header.toLowerCase().includes('growth') || 
-      header.toLowerCase().includes('percentage')
+      header && typeof header === 'string' && (
+        header.toLowerCase().includes('growth') || 
+        header.toLowerCase().includes('percentage')
+      )
     );
     const hasTotalColumns = headers.some(header => 
-      !header.toLowerCase().includes('growth') && 
-      !header.toLowerCase().includes('percentage') &&
-      (header.toLowerCase().includes('total') || 
-       header.toLowerCase().includes('value') ||
-       header.toLowerCase().includes('amount'))
+      header && typeof header === 'string' && (
+        !header.toLowerCase().includes('growth') && 
+        !header.toLowerCase().includes('percentage') &&
+        (header.toLowerCase().includes('total') || 
+         header.toLowerCase().includes('value') ||
+         header.toLowerCase().includes('amount'))
+      )
     );
     const hasDualAxisPotential = hasGrowthColumns && hasTotalColumns;
     
@@ -346,11 +355,13 @@ const DataVisualization = ({
         ];
         
         primaryAxisKeys = allSeries.filter(series => {
+          if (!series || typeof series !== 'string') return false;
           const seriesLower = series.toLowerCase();
           return !secondaryKeywords.some(keyword => seriesLower.includes(keyword));
         });
         
         finalSecondaryAxisKeys = allSeries.filter(series => {
+          if (!series || typeof series !== 'string') return false;
           const seriesLower = series.toLowerCase();
           return secondaryKeywords.some(keyword => seriesLower.includes(keyword));
         });
@@ -380,6 +391,7 @@ const DataVisualization = ({
         ];
         
         const potentialSecondary = yAxisKeys.filter(key => {
+          if (!key || typeof key !== 'string') return false;
           const keyLower = key.toLowerCase();
           return secondaryKeywords.some(keyword => keyLower.includes(keyword));
         });
