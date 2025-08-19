@@ -92,13 +92,13 @@ const DataVisualization = ({
         const specificSecondaryColumns = ['GrowthPercentage'];
         
         const specificSecondary = allSeries.filter(series => 
-          specificSecondaryColumns.some(col => series.includes(col))
+          series && typeof series === 'string' && specificSecondaryColumns.some(col => series.includes(col))
         );
         
         if (specificSecondary.length > 0) {
           finalSecondaryAxisKeys = specificSecondary;
           primaryAxisKeys = allSeries.filter(series => 
-            !specificSecondaryColumns.some(col => series.includes(col))
+            series && typeof series === 'string' && !specificSecondaryColumns.some(col => series.includes(col))
           );
         }
       }
@@ -370,13 +370,13 @@ const DataVisualization = ({
         const specificSecondaryColumns = ['GrowthPercentage'];
         
         const specificSecondary = allSeries.filter(series => 
-          specificSecondaryColumns.some(col => series.includes(col))
+          series && typeof series === 'string' && specificSecondaryColumns.some(col => series.includes(col))
         );
         
         if (specificSecondary.length > 0) {
           finalSecondaryAxisKeys = specificSecondary;
           primaryAxisKeys = allSeries.filter(series => 
-            !specificSecondaryColumns.some(col => series.includes(col))
+            series && typeof series === 'string' && !specificSecondaryColumns.some(col => series.includes(col))
           );
         }
       }
