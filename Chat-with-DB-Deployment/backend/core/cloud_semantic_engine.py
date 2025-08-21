@@ -495,10 +495,10 @@ class CloudSemanticEngine:
             
             # Extract business entities and intent
             business_entities = self._extract_business_entities(query)
-            intent = self._classify_intent(query)
-            domain_concepts = self._extract_domain_concepts(query)
+            intent = self._analyze_intent(query)
+            domain_concepts = self._get_domain_concepts(query)
             temporal_context = self._extract_temporal_context(query)
-            relationships = self._get_business_relationships(query)
+            relationships = self._get_relationships(query)
             semantic_mappings = self._get_semantic_mappings(query)
             vector_similarity = self._calculate_vector_similarity(query)
             

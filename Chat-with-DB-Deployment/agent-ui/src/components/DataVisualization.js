@@ -50,6 +50,21 @@ const DataVisualization = ({
     let yAxisKeys = chartConfig?.yAxis?.length > 0 
       ? chartConfig.yAxis 
       : table.headers.slice(1);
+    
+    // Validate that yAxisKeys actually exist in the data
+    if (table && table.chartData && table.chartData.length > 0) {
+      const availableFields = Object.keys(table.chartData[0]);
+      yAxisKeys = yAxisKeys.filter(key => availableFields.includes(key));
+      
+      // If no valid yAxisKeys found, use the first numeric field from data
+      if (yAxisKeys.length === 0) {
+        const numericFields = availableFields.filter(field => 
+          typeof table.chartData[0][field] === 'number'
+        );
+        yAxisKeys = numericFields.length > 0 ? numericFields : ['Value'];
+      }
+    }
+    
     const groupBy = chartConfig?.groupBy;
 
     // Enhanced secondary axis detection
@@ -307,6 +322,21 @@ const DataVisualization = ({
     let yAxisKeys = chartConfig?.yAxis?.length > 0 
       ? chartConfig.yAxis 
       : table.headers.slice(1);
+    
+    // Validate that yAxisKeys actually exist in the data
+    if (rawData && rawData.length > 0) {
+      const availableFields = Object.keys(rawData[0]);
+      yAxisKeys = yAxisKeys.filter(key => availableFields.includes(key));
+      
+      // If no valid yAxisKeys found, use the first numeric field from data
+      if (yAxisKeys.length === 0) {
+        const numericFields = availableFields.filter(field => 
+          typeof rawData[0][field] === 'number'
+        );
+        yAxisKeys = numericFields.length > 0 ? numericFields : ['Value'];
+      }
+    }
+    
     const groupBy = chartConfig?.groupBy;
 
     // If groupBy is provided (e.g., StateName) and there is only one measure in yAxis
@@ -724,10 +754,22 @@ const DataVisualization = ({
       flex: 1,
     }));
 
-    const rows = table.rows.map((row, index) => ({
-      id: index,
-      ...row,
-    }));
+    const rows = table.rows.map((row, index) => {
+      if (Array.isArray(row)) {
+        // Convert array format to object format
+        const rowObj = { id: index };
+        table.headers.forEach((header, headerIndex) => {
+          rowObj[header] = row[headerIndex];
+        });
+        return rowObj;
+      } else {
+        // Handle object format
+        return {
+          id: index,
+          ...row,
+        };
+      }
+    });
 
     return (
       <Box sx={{ height: 400, width: '100%' }}>
@@ -757,7 +799,8 @@ const DataVisualization = ({
     );
   };
 
-  if (!plot || !table || !table.chartData || table.chartData.length === 0) {
+  // Only return null if there's absolutely no data to display
+  if (!table || ((!table.chartData || table.chartData.length === 0) && (!table.rows || table.rows.length === 0))) {
     return null;
   }
 

@@ -35,12 +35,43 @@ class EnhancedRAGService:
     Combines semantic processing, MDL support, and advanced vector search
     """
     
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self, db_path: str = "config/"):
+        """Initialize Enhanced RAG Service with all components"""
+        logger.info("🚀 Initializing Enhanced RAG Service...")
+        
+        # Debug: Check current working directory and environment
+        import os
+        logger.info(f"📁 Current working directory: {os.getcwd()}")
+        logger.info(f"📁 Absolute path: {os.path.abspath('.')}")
+        logger.info(f"📁 .env file exists: {os.path.exists('.env')}")
+        logger.info(f"📁 .env file absolute path: {os.path.abspath('.env')}")
+        
+        # Debug: Check environment variables directly
+        google_api_key_env = os.getenv("GOOGLE_API_KEY")
+        logger.info(f"🔑 GOOGLE_API_KEY from os.getenv: {'*' * len(google_api_key_env) if google_api_key_env else 'None'}")
+        
+        # Debug: Check if we can read .env file
+        if os.path.exists('.env'):
+            try:
+                with open('.env', 'r', encoding='utf-8') as f:
+                    env_content = f.read()
+                    logger.info(f"📄 .env file size: {len(env_content)} characters")
+                    logger.info(f"📄 .env file first 200 chars: {env_content[:200]}...")
+            except Exception as e:
+                logger.error(f"❌ Error reading .env file: {e}")
+        else:
+            logger.warning(f"⚠️ .env file not found in current directory")
+        
+        self.db_path = db_path  # Store db_path as instance attribute
         self.settings = get_settings()
+        logger.info(f"⚙️ Settings loaded: {self.settings.database_type}")
+        logger.info(f"⚙️ LLM Provider Type: {self.settings.llm_provider_type}")
+        logger.info(f"⚙️ Google API Key loaded: {'*' * len(self.settings.google_api_key) if self.settings.google_api_key else 'None'}")
+        logger.info(f"⚙️ Gemini Model: {self.settings.gemini_model}")
         
         # Initialize LLM provider
         if self.settings.llm_provider_type.lower() == "gemini":
+            logger.info("🔧 Creating Gemini LLM provider...")
             # Use Gemini-specific configuration
             self.llm_provider = create_llm_provider(
                 provider_type=self.settings.llm_provider_type,
@@ -49,7 +80,16 @@ class EnhancedRAGService:
                 base_url=None,  # Gemini doesn't use base_url
                 enable_gpu=self.settings.enable_gpu_acceleration
             )
+            logger.info(f"✅ LLM Provider created: {type(self.llm_provider).__name__}")
+            
+            # Debug: Check if it's a mock provider
+            if "Mock" in type(self.llm_provider).__name__:
+                logger.warning(f"⚠️ WARNING: Mock provider created - API key issue detected!")
+                logger.warning(f"⚠️ Expected: GeminiLLMProvider, Got: {type(self.llm_provider).__name__}")
+            else:
+                logger.info(f"✅ Real Gemini provider created successfully!")
         else:
+            logger.info(f"🔧 Creating generic LLM provider: {self.settings.llm_provider_type}")
             # Use generic LLM configuration
             self.llm_provider = create_llm_provider(
                 provider_type=self.settings.llm_provider_type,
@@ -58,19 +98,21 @@ class EnhancedRAGService:
                 base_url=self.settings.llm_base_url,
                 enable_gpu=self.settings.enable_gpu_acceleration
             )
+            logger.info(f"✅ Generic LLM Provider created: {type(self.llm_provider).__name__}")
         
         # Initialize semantic components
         if os.path.exists(db_path):
+            logger.info(f"🗄️ Database path exists: {db_path}")
             self.semantic_engine = CloudSemanticEngine(self.llm_provider, db_path)
             self.wren_ai_integration = WrenAIIntegration(self.llm_provider, mdl_path="config/", db_path=db_path)
         else:
-            logger.warning(f"EnhancedRAGService: database path '{db_path}' not found – running in no-DB mode (testing)")
+            logger.warning(f"⚠️ EnhancedRAGService: database path '{db_path}' not found – running in no-DB mode (testing)")
             # Use CloudSemanticEngine with MS SQL Server connection for testing
             try:
                 self.semantic_engine = CloudSemanticEngine(self.llm_provider, self.settings.get_database_url())
-                logger.info("Using CloudSemanticEngine with MS SQL Server connection")
+                logger.info("✅ Using CloudSemanticEngine with MS SQL Server connection")
             except Exception as e:
-                logger.warning(f"Failed to initialize CloudSemanticEngine: {e}, using stub")
+                logger.warning(f"⚠️ Failed to initialize CloudSemanticEngine: {e}, using stub")
                 # Fallback to stub if MS SQL Server connection fails
                 async def stub_initialize():
                     logger.info("Stub semantic engine initialize called")
@@ -84,6 +126,7 @@ class EnhancedRAGService:
                 })()
             
             # Initialize Wren AI integration with proper MDL path
+            logger.info(f"🔧 Initializing Wren AI integration with mdl_path=config/, db_path={db_path}")
             self.wren_ai_integration = WrenAIIntegration(self.llm_provider, mdl_path="config/", db_path=db_path)
         
         # Initialize core components
@@ -112,6 +155,7 @@ class EnhancedRAGService:
         }
         
         self._initialized = False
+        logger.info("🚀 Enhanced RAG Service initialization completed!")
         
     async def initialize(self):
         """Initialize all components"""
@@ -1273,6 +1317,7 @@ class EnhancedRAGService:
                 "plot": plot,
                 "confidence": best.get("score", 0.7),
                 "processing_method": "enhanced_unified",
+                "candidates": candidates,  # Add the actual candidates
                 "candidate_count": len(candidates),
                 "selected_candidate_source": best.get("source"),
                 "keyword_summary": keyword_summary,
@@ -1284,6 +1329,7 @@ class EnhancedRAGService:
                 "sql": best.get("sql"),
                 "data": [],
                 "processing_method": "enhanced_unified_failed",
+                "candidates": candidates,  # Add the actual candidates
                 "candidate_count": len(candidates),
                 "selected_candidate_source": best.get("source"),
                 "keyword_summary": keyword_summary,

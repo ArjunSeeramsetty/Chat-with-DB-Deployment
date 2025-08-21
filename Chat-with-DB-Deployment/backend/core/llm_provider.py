@@ -139,6 +139,49 @@ class MockLLMProvider(LLMProvider):
                     usage={"total_tokens": 100, "prompt_tokens": 80, "completion_tokens": 20}
                 )
             
+            # MDL-aware SQL generation responses (Wren AI integration)
+            elif "mdl" in prompt_lower or "semantic context" in prompt_lower or "business entities" in prompt_lower:
+                # Generate SQL based on the context in the prompt
+                if "energy consumption" in prompt_lower and "region" in prompt_lower:
+                    sql = """SELECT r.RegionName, ROUND(SUM(f.EnergyMet), 2) AS TotalEnergyConsumption
+FROM FactAllIndiaDailySummary f
+JOIN DimRegions r ON f.RegionID = r.RegionID
+JOIN DimDates d ON f.DateID = d.DateID
+WHERE DATEPART(YEAR, d.ActualDate) = 2024
+GROUP BY r.RegionName
+ORDER BY TotalEnergyConsumption DESC;"""
+                elif "energy demand" in prompt_lower and "region" in prompt_lower:
+                    sql = """SELECT r.RegionName, ROUND(SUM(f.MaxDemandSCADA), 2) AS TotalEnergyDemand
+FROM FactAllIndiaDailySummary f
+JOIN DimRegions r ON f.RegionID = r.RegionID
+JOIN DimDates d ON f.DateID = d.DateID
+WHERE DATEPART(YEAR, d.ActualDate) = 2024
+GROUP BY r.RegionName
+ORDER BY TotalEnergyDemand DESC;"""
+                elif "generation" in prompt_lower and "source" in prompt_lower:
+                    sql = """SELECT dgs.SourceName, ROUND(SUM(fdgb.GenerationAmount), 2) AS TotalGeneration
+FROM FactDailyGenerationBreakdown fdgb
+JOIN DimGenerationSources dgs ON fdgb.GenerationSourceID = dgs.GenerationSourceID
+JOIN DimDates d ON fdgb.DateID = d.DateID
+WHERE DATEPART(YEAR, d.ActualDate) = 2024
+GROUP BY dgs.SourceName
+ORDER BY TotalGeneration DESC;"""
+                else:
+                    # Default MDL-aware SQL
+                    sql = """SELECT r.RegionName, ROUND(SUM(f.EnergyMet), 2) AS TotalEnergyMet
+FROM FactAllIndiaDailySummary f
+JOIN DimRegions r ON f.RegionID = r.RegionID
+JOIN DimDates d ON f.DateID = d.DateID
+WHERE DATEPART(YEAR, d.ActualDate) = 2024
+GROUP BY r.RegionName
+ORDER BY TotalEnergyMet DESC;"""
+                
+                return LLMResponse(
+                    content=sql,
+                    is_safe=True,
+                    usage={"total_tokens": 150, "prompt_tokens": 120, "completion_tokens": 30}
+                )
+            
             # Complexity analysis responses
             elif "complexity" in prompt_lower or "analyze" in prompt_lower:
                 if "average" in prompt_lower or "total" in prompt_lower:
@@ -407,18 +450,25 @@ def create_llm_provider(
     gpu_device: Optional[str] = None,
 ) -> LLMProvider:
     """Factory function to create LLM provider"""
+    
+    print(f"🔧 Creating LLM provider: {provider_type}")
+    print(f"📊 API Key provided: {'*' * len(api_key) if api_key else 'None'}")
+    print(f"📊 Model: {model}")
+    print(f"📊 Base URL: {base_url}")
 
     if not provider_type:
-        logger.info("No LLM provider configured, using mock provider")
+        print("⚠️ No LLM provider configured, using mock provider")
         return MockLLMProvider()
 
     if provider_type.lower() == "openai":
         if not api_key:
-            logger.warning("OpenAI provider requires API key, using mock provider")
+            print("⚠️ OpenAI provider requires API key, using mock provider")
             return MockLLMProvider()
+        print("✅ Creating OpenAI provider")
         return OpenAIProvider(api_key, model or "gpt-3.5-turbo")
     elif provider_type.lower() == "ollama":
         # Ollama doesn't require an API key
+        print("✅ Creating Ollama provider")
         return OllamaProvider(
             api_key=api_key or "ollama",
             model=model or "llama3.2:3b",
@@ -428,31 +478,35 @@ def create_llm_provider(
         )
     elif provider_type.lower() == "gemini":
         try:
+            print("🔧 Attempting to create Gemini provider...")
             from .llm_provider_gemini import GeminiLLMProvider, GeminiConfig
             
             if not api_key:
-                logger.warning("Gemini provider requires API key, using mock provider")
+                print("⚠️ Gemini provider requires API key, using mock provider")
                 return MockLLMProvider()
                 
+            print(f"✅ Creating Gemini provider with API key: {'*' * len(api_key)}")
             config = GeminiConfig(
                 api_key=api_key,
                 model=model or "gemini-2.5-flash-lite"
             )
-            return GeminiLLMProvider(config)
+            provider = GeminiLLMProvider(config)
+            print(f"✅ Gemini provider created successfully: {type(provider).__name__}")
+            return provider
         except ImportError as e:
-            logger.error(f"Failed to import Gemini provider: {e}")
+            print(f"❌ Failed to import Gemini provider: {e}")
             return MockLLMProvider()
         except Exception as e:
-            logger.error(f"Failed to create Gemini provider: {e}")
+            print(f"❌ Failed to create Gemini provider: {e}")
             return MockLLMProvider()
     elif provider_type.lower() == "anthropic":
         # TODO: Implement Anthropic provider
-        logger.warning("Anthropic provider not yet implemented, using mock")
+        print("⚠️ Anthropic provider not yet implemented, using mock")
         return MockLLMProvider()
     elif provider_type.lower() == "local":
         # TODO: Implement local provider (Ollama, etc.)
-        logger.warning("Local provider not yet implemented, using mock")
+        print("⚠️ Local provider not yet implemented, using mock")
         return MockLLMProvider()
     else:
-        logger.warning(f"Unknown LLM provider type: {provider_type}, using mock")
+        print(f"⚠️ Unknown LLM provider type: {provider_type}, using mock")
         return MockLLMProvider()

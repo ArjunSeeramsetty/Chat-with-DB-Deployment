@@ -1618,20 +1618,20 @@ class WrenAIIntegration:
             if preferred_time and not has_date_fk and 'd.ActualDate' in fixed:
                 fixed = _re.sub(r"JOIN\s+DimDates\s+d\s+ON\s+[^\s]+", "", fixed, flags=_re.IGNORECASE)
                 fixed = fixed.replace('d.ActualDate', f'{fact_alias}.{preferred_time}')
-                fixed = _re.sub(r"strftime\('%Y-%m',\s*d\.ActualDate\)", f"strftime('%Y-%m', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
-                fixed = _re.sub(r"strftime\('%Y',\s*d\.ActualDate\)", f"strftime('%Y', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"FORMAT\(d\.ActualDate,\s*'yyyy-MM'\)", f"FORMAT({fact_alias}.{preferred_time}, 'yyyy-MM')", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"DATEPART\(YEAR,\s*d\.ActualDate\)", f"DATEPART(YEAR, {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
 
             # 2b) Model-specific time column enforcement
             if ('factinternationaltransmissionlinkflow' in table_lower or 'facttransmissionlinkflow' in table_lower) and preferred_time:
                 # ensure we use fs.<preferred_time> and not d.ActualDate
                 fixed = _re.sub(r"JOIN\s+DimDates\s+d\s+ON\s+[^\s]+", "", fixed, flags=_re.IGNORECASE)
-                fixed = _re.sub(r"strftime\('\%Y-\%m',\s*d\.ActualDate\)", f"strftime('%Y-%m', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
-                fixed = _re.sub(r"strftime\('\%Y',\s*d\.ActualDate\)", f"strftime('%Y', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"FORMAT\(d\.ActualDate,\s*'yyyy-MM'\)", f"FORMAT({fact_alias}.{preferred_time}, 'yyyy-MM')", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"DATEPART\(YEAR,\s*d\.ActualDate\)", f"DATEPART(YEAR, {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
                 fixed = fixed.replace('d.ActualDate', f'{fact_alias}.{preferred_time}')
             if ('facttimeblockpowerdata' in table_lower or 'facttimeblockgeneration' in table_lower) and preferred_time:
                 fixed = _re.sub(r"JOIN\s+DimDates\s+d\s+ON\s+[^\s]+", "", fixed, flags=_re.IGNORECASE)
-                fixed = _re.sub(r"strftime\('\%Y-\%m',\s*d\.ActualDate\)", f"strftime('%Y-%m', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
-                fixed = _re.sub(r"strftime\('\%Y',\s*d\.ActualDate\)", f"strftime('%Y', {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"FORMAT\(d\.ActualDate,\s*'yyyy-MM'\)", f"FORMAT({fact_alias}.{preferred_time}, 'yyyy-MM')", fixed, flags=_re.IGNORECASE)
+                fixed = _re.sub(r"DATEPART\(YEAR,\s*d\.ActualDate\)", f"DATEPART(YEAR, {fact_alias}.{preferred_time})", fixed, flags=_re.IGNORECASE)
                 fixed = fixed.replace('d.ActualDate', f'{fact_alias}.{preferred_time}')
 
             # 2c) Country exchange model: ensure joins and date usage (this model typically has DateID and CountryID)
@@ -1640,8 +1640,9 @@ class WrenAIIntegration:
                 if 'CountryName' in fixed or 'countryname' in fixed.lower():
                     if not _re.search(r"JOIN\s+DimCountries\s+dc\s+ON\s+[^\s]+", fixed, _re.IGNORECASE):
                         fixed = fixed.replace(f"FROM {fact_table} {fact_alias}", f"FROM {fact_table} {fact_alias} JOIN DimCountries dc ON {fact_alias}.CountryID = dc.CountryID")
-                # Ensure DimDates join when strftime on d.ActualDate used
-                if "strftime('" in fixed and 'd.ActualDate' in fixed and not _re.search(r"JOIN\s+DimDates\s+d\s+ON\s+[^\s]+", fixed, _re.IGNORECASE):
+                
+                # Ensure DimDates join when DATEPART on d.ActualDate used
+                if "DATEPART(" in fixed and 'd.ActualDate' in fixed and not _re.search(r"JOIN\s+DimDates\s+d\s+ON\s+[^\s]+", fixed, _re.IGNORECASE):
                     fixed = fixed.replace(f"FROM {fact_table} {fact_alias}", f"FROM {fact_table} {fact_alias} JOIN DimDates d ON {fact_alias}.DateID = d.DateID")
 
             # 3) Clean f.Table.Column → alias.Column noise
@@ -1678,12 +1679,12 @@ class WrenAIIntegration:
                     # Inject month filter if month specified and time_expr exists
                     if time_expr and month_num:
                         # Only inject if a month filter is not already present
-                        if _re.search(r"strftime\('%m',\s*" + _re.escape(time_expr) + r"\)\s*=\s*'\d{2}'", fixed) is None:
+                        if _re.search(r"DATEPART\(month,\s*" + _re.escape(time_expr) + r"\)\s*=\s*\d+", fixed) is None:
                             # Add to WHERE clause; if WHERE exists, append AND, else create WHERE
                             if _re.search(r"\bWHERE\b", fixed, _re.IGNORECASE):
-                                fixed = _re.sub(r"\bWHERE\b", lambda m: m.group(0) + f" strftime('%m', {time_expr}) = '{month_num}' AND", fixed, count=1, flags=_re.IGNORECASE)
+                                fixed = _re.sub(r"\bWHERE\b", lambda m: m.group(0) + f" DATEPART(MONTH, {time_expr}) = {month_num} AND", fixed, count=1, flags=_re.IGNORECASE)
                             else:
-                                fixed += f" WHERE strftime('%m', {time_expr}) = '{month_num}'"
+                                fixed += f" WHERE DATEPART(MONTH, {time_expr}) = {month_num}"
                     # Inject day filter for patterns like '15th June 2025'
                     day_m = _re.search(r"\b(\d{1,2})(st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+((19|20)\d{2})\b", ql)
                     if time_expr and day_m:
@@ -1692,11 +1693,11 @@ class WrenAIIntegration:
                         yr = day_m.group(4)
                         if mon and yr:
                             date_iso = f"{yr}-{mon}-{day}"
-                            if _re.search(r"date\(\s*" + _re.escape(time_expr) + r"\s*\)\s*=\s*'\d{4}-\d{2}-\d{2}'", fixed) is None:
+                            if _re.search(r"CONVERT\(date,\s*" + _re.escape(time_expr) + r"\s*\)\s*=\s*'\d{4}-\d{2}-\d{2}'", fixed) is None:
                                 if _re.search(r"\bWHERE\b", fixed, _re.IGNORECASE):
-                                    fixed = _re.sub(r"\bWHERE\b", lambda m: m.group(0) + f" date({time_expr}) = '{date_iso}' AND", fixed, count=1, flags=_re.IGNORECASE)
+                                    fixed = _re.sub(r"\bWHERE\b", lambda m: m.group(0) + f" CONVERT(DATE, {time_expr}) = '{date_iso}' AND", fixed, count=1, flags=_re.IGNORECASE)
                                 else:
-                                    fixed += f" WHERE date({time_expr}) = '{date_iso}'"
+                                    fixed += f" WHERE CONVERT(DATE, {time_expr}) = '{date_iso}'"
             except Exception:
                 pass
 
@@ -2056,11 +2057,11 @@ class WrenAIIntegration:
             lower = (sql or "").lower()
             opts: Dict[str, Any] = {}
             # xAxis detection: Month/Year/Day
-            if "strftime('%y-%m'".replace("%y", "%Y").lower() in lower or "strftime('%y-%m'" in lower:
+            if "format(" in lower and "yyyy-mm" in lower:
                 opts["xAxis"] = "Month"
-            elif "strftime('%y'".replace("%y", "%Y").lower() in lower:
+            elif "datepart(year" in lower:
                 opts["xAxis"] = "Year"
-            elif "strftime('%y-%m-%d'".replace("%y", "%Y").lower() in lower:
+            elif "convert(date" in lower:
                 opts["xAxis"] = "Day"
             # groupBy detection for common dims
             if "group by r.regionname" in lower:
@@ -2197,20 +2198,20 @@ class WrenAIIntegration:
                     sql = (
                         f"SELECT "
                         + ("dgs.SourceName AS Source, " if 'factdailygenerationbreakdown' in tl else "")
-                        + "strftime('%Y-%m', d.ActualDate) AS Month, "
+                        + "FORMAT(d.ActualDate, 'yyyy-MM') AS Month, "
                         + f"ROUND(SUM(fs.{value_col}), 2) AS Value FROM {table_name} fs "
                         + (" ".join(j for j in joins) + " " if joins else "")
-                        + (f"WHERE strftime('%Y', d.ActualDate) = '{year}' " if year else "")
+                        + (f"WHERE DATEPART(YEAR, d.ActualDate) = {year} " if year else "")
                         + ("GROUP BY " + ("dgs.SourceName, " if 'factdailygenerationbreakdown' in tl else "") + "Month ORDER BY Month")
                     )
                 elif ptime:
                     sql = (
                         f"SELECT "
                         + ("dgs.SourceName AS Source, " if 'factdailygenerationbreakdown' in tl else "")
-                        + f"strftime('%Y-%m', fs.{ptime}) AS Month, "
+                        + f"FORMAT(fs.{ptime}, 'yyyy-MM') AS Month, "
                         + f"ROUND(SUM(fs.{value_col}), 2) AS Value FROM {table_name} fs "
                         + (" ".join(j for j in joins if not j.startswith("JOIN DimDates")) + " " if joins else "")
-                        + (f"WHERE strftime('%Y', fs.{ptime}) = '{year}' " if year else "")
+                        + (f"WHERE DATEPART(YEAR, fs.{ptime}) = {year} " if year else "")
                         + ("GROUP BY " + ("dgs.SourceName, " if 'factdailygenerationbreakdown' in tl else "") + "Month ORDER BY Month")
                     )
                 else:
@@ -2219,9 +2220,9 @@ class WrenAIIntegration:
                 if has_date_fk:
                     filters = []
                     if year:
-                        filters.append(f"strftime('%Y', d.ActualDate) = '{year}'")
+                        filters.append(f"DATEPART(YEAR, d.ActualDate) = {year}")
                     if day_full:
-                        filters.append(f"date(d.ActualDate) = '{day_full}'")
+                        filters.append(f"CONVERT(DATE, d.ActualDate) = '{day_full}'")
                     where_clause = (" WHERE " + " AND ".join(filters)) if filters else ""
                     sql = (
                         f"SELECT ROUND(SUM(fs.{value_col}), 2) AS Value FROM {table_name} fs "
@@ -2232,10 +2233,10 @@ class WrenAIIntegration:
                 elif ptime:
                     filters = []
                     if year:
-                        filters.append(f"strftime('%Y', fs.{ptime}) = '{year}'")
+                        filters.append(f"DATEPART(YEAR, fs.{ptime}) = {year}")
                     if day_full:
-                        filters.append(f"date(fs.{ptime}) = '{day_full}'")
-                    where_clause = (" WHERE " + " AND ".join(filters)) if filters else ""
+                        filters.append(f"CONVERT(DATE, fs.{ptime}) = '{day_full}'")
+                    where_clause = (" WHERE " + " ".join(filters)) if filters else ""
                     sql = (
                         f"SELECT ROUND(SUM(fs.{value_col}), 2) AS Value FROM {table_name} fs "
                         + (" ".join(j for j in joins) + " " if joins else "")

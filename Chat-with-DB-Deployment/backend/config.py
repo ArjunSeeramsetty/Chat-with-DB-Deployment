@@ -31,8 +31,8 @@ class Settings(BaseSettings):
     llm_provider_type: str = Field(default="gemini", env="LLM_PROVIDER_TYPE")
     
     # Gemini Configuration (Primary LLM)
-    gemini_api_key: str = Field(default="", env="GOOGLE_API_KEY")
-    google_api_key: str = Field(default="", env="GOOGLE_API_KEY")  # Alias for compatibility
+    google_api_key: str = Field(default="", env="GOOGLE_API_KEY")  # Primary field
+    gemini_api_key: str = Field(default="", env="GOOGLE_API_KEY")  # Alias for compatibility
     gemini_model: str = Field(default="gemini-2.5-flash-lite", env="GEMINI_MODEL")
     gemini_temperature: float = Field(default=0.1, env="GEMINI_TEMPERATURE")
     gemini_max_output_tokens: int = Field(default=8192, env="GEMINI_MAX_OUTPUT_TOKENS")
@@ -114,6 +114,14 @@ class Settings(BaseSettings):
     enable_llm_clarification: bool = Field(default=True, env="ENABLE_LLM_CLARIFICATION")
     memory_cache_ttl: int = Field(default=3600, env="MEMORY_CACHE_TTL")
     
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Ensure gemini_api_key gets the same value as google_api_key
+        if self.google_api_key and not self.gemini_api_key:
+            self.gemini_api_key = self.google_api_key
+        elif self.gemini_api_key and not self.google_api_key:
+            self.google_api_key = self.gemini_api_key
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8-sig"  # Handle BOM
@@ -160,10 +168,27 @@ def get_settings() -> Settings:
     """Get global settings instance"""
     global _settings
     if _settings is None:
+        print("🔧 Creating new Settings instance...")
+        print(f"📁 Current working directory: {os.getcwd()}")
+        print(f"📁 .env file exists: {os.path.exists('.env')}")
+        print(f"📁 .env file absolute path: {os.path.abspath('.env')}")
+        
+        # Check environment variables before creating settings
+        google_api_key_env = os.getenv("GOOGLE_API_KEY")
+        print(f"🔑 GOOGLE_API_KEY from os.getenv: {'*' * len(google_api_key_env) if google_api_key_env else 'None'}")
+        
         _settings = Settings()
+        print(f"✅ Settings instance created")
+        print(f"📊 LLM Provider Type: {_settings.llm_provider_type}")
+        print(f"📊 Google API Key loaded: {'*' * len(_settings.google_api_key) if _settings.google_api_key else 'None'}")
+        print(f"📊 Gemini API Key loaded: {'*' * len(_settings.gemini_api_key) if _settings.gemini_api_key else 'None'}")
+        
         # Set database_path dynamically
         if _settings.database_type.lower() == "mssql":
             _settings.database_path = _settings.get_database_url()
+            print(f"🗄️ Database URL set: {_settings.database_path[:50]}...")
+    else:
+        print("♻️ Using existing Settings instance")
     return _settings
 
 def update_settings(**kwargs):

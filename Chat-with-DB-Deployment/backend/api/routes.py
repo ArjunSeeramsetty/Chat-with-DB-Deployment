@@ -584,8 +584,10 @@ async def ask_question_enhanced(request: QueryRequest):
             "confidence": processing_result.get("confidence", 0.0),
             "execution_time": processing_result.get("execution_time", 0.0),
             "session_id": request.session_id or "",
-            "processing_mode": processing_result.get("processing_method", "enhanced_semantic"),
+            "processing_mode": processing_result.get("processing_method", "enhanced_unified"),
             "selected_candidate_source": processing_result.get("selected_candidate_source"),
+            "candidates": processing_result.get("candidates", []),
+            "candidate_count": processing_result.get("candidate_count", 0),
             "semantic_insights": processing_result.get("semantic_context", {}),
             "performance_metrics": processing_result.get("performance_metrics", {}),
             "recommendations": processing_result.get("recommendations", []),
@@ -886,27 +888,49 @@ async def ask_question_fixed(request: QueryRequest):
 
         # Get settings
         settings = get_settings()
-        db_path = settings.database_path
+        
+        # Check database type and use appropriate connection
+        if settings.database_type == "mssql":
+            # Use MS SQL Server connection
+            from backend.core.executor import SQLExecutor
+            sql_executor = SQLExecutor()
+            
+            # Get schema info from MS SQL Server
+            try:
+                schema_info = sql_executor._get_schema_info()
+                tables = list(schema_info.keys())
+            except Exception as e:
+                logger.error(f"Failed to get MS SQL Server schema: {e}")
+                # Fallback to basic schema
+                schema_info = {
+                    "FactAllIndiaDailySummary": ["RegionID", "DateID", "EnergyMet", "MaxDemandSCADA"],
+                    "DimRegions": ["RegionID", "RegionName"],
+                    "DimDates": ["DateID", "ActualDate", "Year", "Month", "DayOfMonth"]
+                }
+                tables = list(schema_info.keys())
+        else:
+            # Use SQLite connection (fallback)
+            db_path = settings.database_path
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
 
-        # Create fresh components
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
+            # Get schema info
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
 
-        # Get schema info
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [row[0] for row in cursor.fetchall()]
+            schema_info = {}
+            for table in tables:
+                cursor.execute(f"PRAGMA table_info({table})")
+                columns = [row[1] for row in cursor.fetchall()]
+                schema_info[table] = columns
 
-        schema_info = {}
-        for table in tables:
-            cursor.execute(f"PRAGMA table_info({table})")
-            columns = [row[1] for row in cursor.fetchall()]
-            schema_info[table] = columns
+            conn.close()
 
         # Initialize fresh components
-        schema_linker = SchemaLinker(schema_info, db_path)
+        schema_linker = SchemaLinker(schema_info, settings.database_url or "mssql")
         intent_analyzer = IntentAnalyzer()
         assembler = SQLAssembler()
-        rag_service = EnhancedRAGService(db_path)
+        rag_service = EnhancedRAGService()
 
         # Process query
         response = await rag_service.process_query(request)
@@ -922,11 +946,9 @@ async def ask_question_fixed(request: QueryRequest):
             {
                 "llm_model": settings.llm_model or "llama3.2:3b",
                 "llm_provider": settings.llm_provider_type,
-                "gpu_status": rag_service._get_gpu_status(),
+                "gpu_status": getattr(rag_service, '_get_gpu_status', lambda: {})() if hasattr(rag_service, '_get_gpu_status') else {},
             }
         )
-
-        conn.close()
 
         if response.success:
             return response_dict
